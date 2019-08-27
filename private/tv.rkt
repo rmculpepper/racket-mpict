@@ -1,57 +1,103 @@
 #lang racket/base
-(require racket/stxparam (for-syntax racket/base syntax/parse))
+(require (for-syntax racket/base syntax/parse)
+         racket/match
+         racket/stxparam)
 (provide (except-out (all-defined-out) tv:app)
          (rename-out [tv:app #%app]))
 
 ;; A UReal is a Real in the range [0,1].
 
-;; A TimedValue[X] is one of
+;; A SmoothValue[X] is one of
 ;; - X
 ;; - (tv (UReal -> X) X X)
 (struct tv (f v0 v1))
+
+;; A TimedValue[X] is one of
+;; - SmoothValue[X]
+;; - (dv TimedValue[X] TimedValue[X])   -- "discrete" time steps
+(struct dv (fst snd))
 
 (define Time (tv values 0 1))
 (define RTime (tv (lambda (u) (- 1 u)) 1 0))
 
 ;; TODO: easing functions!
 
+(define (const? x) (not (or (tv? x) (dv? x))))
+(define (smooth? x) (not (dv? x)))
+
+(define (dv* left right)
+  (if (eqv? left right) left (dv left right)))
+
+(define (dv-left v)
+  (match v
+    [(dv v1 v2) v1]
+    [(? tv? v) v]
+    [v v]))
+(define (dv-right v)
+  (match v
+    [(dv v1 v2) v2]
+    [(tv f v0 v1) v1]
+    [v v]))
+
 ;; ----------------------------------------
 
 (define (-share v)
-  (cond [(tv? v)
-         (tv (let ([h (make-hasheqv)] [f (tv-f v)])
-               (lambda (u) (hash-ref! h u (lambda () (f u)))))
-             (tv-v0 v) (tv-v1 v))]
-        [else v]))
+  (match v
+    [(dv v1 v2)
+     (let ([v1* (-share v1)] [v2* (-share v2)])
+       (if (and (eq? v1* v1) (eq? v2* v2)) v (dv v1* v2*)))]
+    [(tv f v0 v1)
+     (tv (let ([h (make-hasheqv)])
+           (lambda (u) (hash-ref! h u (lambda () (f u)))))
+         v0 v1)]
+    [_ v]))
 
-;; get : UReal -> TimedValue[X] -> X
-(define ((get u) arg) (if (tv? arg) ((tv-f arg) u) arg))
+;; get : UReal -> SmoothValue[X] -> X
+(define ((get u) arg)
+  (match arg
+    [(tv f _ _) (f u)]
+    [v v]))
 
-;; -get{0,1} : TimedValue[X] -> X
-(define (-get0 arg) (if (tv? arg) (tv-v0 arg) arg))
-(define (-get1 arg) (if (tv? arg) (tv-v1 arg) arg))
+;; -get{A,Z} : TimedValue[X] -> X
+(define (-getA arg)
+  (match arg
+    [(dv v1 _) (-getA v1)]
+    [(tv _ v0 _) v0]
+    [v v]))
+(define (-getZ arg)
+  (match arg
+    [(dv _ v2) (-getZ v2)]
+    [(tv _ _ v1) v1]
+    [v v]))
 
 ;; tvapply : (X ... -> Y) (List TimedValue[X] ...) -> TimedValue[Y]
 (define (tvapply f args)
-  (cond [(ormap tv? args)
+  (cond [(ormap dv? args)
+         (dv (tvapply f (map dv-left args))
+             (tvapply f (map dv-right args)))]
+        [(ormap tv? args)
          (tv (lambda (u) (apply f (map (get u) args)))
-             (apply f (map -get0 args))
-             (apply f (map -get1 args)))]
+             (apply f (map -getA args))
+             (apply f (map -getZ args)))]
         [else (apply f args)]))
 
-;; tvapp : (X ... -> Y) TimedValue[X] ... -> TimedValue[Y]
+;; tvapp{1,2,N} : (X ... -> Y) TimedValue[X] ... -> TimedValue[Y]
 (define (tvapp1 f arg)
-  (cond [(tv? arg)
-         (let ([argf (tv-f arg)])
-           (tv (lambda (u) (f (argf u)))
-               (f (tv-v0 arg))
-               (f (tv-v1 arg))))]
-        [else (f arg)]))
+  (match arg
+    [(dv v1 v2)
+     (dv* (tvapp1 f v1) (tvapp1 f v2))]
+    [(tv argf v0 v1)
+     (tv (lambda (u) (f (argf u)))
+         (f v0) (f v1))]
+    [v (f v)]))
 (define (tvapp2 f arg1 arg2)
-  (cond [(or (tv? arg1) (tv? arg2))
+  (cond [(or (dv? arg1) (dv? arg2))
+         (dv* (tvapp f (dv-left arg1) (dv-left arg2))
+              (tvapp f (dv-right arg2) (dv-right arg2)))]
+        [(or (tv? arg1) (tv? arg2))
          (tv (lambda (u) (f ((get u) arg1) ((get u) arg2)))
-             (f (-get0 arg1) (-get0 arg2))
-             (f (-get1 arg1) (-get1 arg2)))]
+             (f (-getA arg1) (-getA arg2))
+             (f (-getZ arg1) (-getZ arg2)))]
         [else (f arg1 arg2)]))
 (define (tvappN f . args)
   (tvapply f args))
@@ -101,6 +147,7 @@
 (define-syntax-rule (begin/unlifted . body)
   (syntax-parameterize ((tv-lifting? #f)) . body))
 
-(define/unlifted (get0 mp) (-get0 mp))
-(define/unlifted (get1 mp) (-get1 mp))
-(define/unlifted (share mp) (-share mp))
+(define-syntax getA (unlifted-transformer #'-getA))
+(define-syntax getZ (unlifted-transformer #'-getZ))
+(define-syntax share (unlifted-transformer #'-share))
+(define-syntax // (unlifted-transformer #'dv))

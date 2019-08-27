@@ -8,20 +8,23 @@
 
 (define/unlifted (slide/mpict mp)
   (begin/unlifted
-    (cond [(tv? mp)
+    (cond [(dv? mp)
+           (slide/mpict (dv-left mp))
+           (slide/mpict (dv-right mp))]
+          [(tv? mp)
            (for ([u (in-range 0 1 (/ FPS))])
              (slide #:timeout (/ FPS) ((get u) mp)))
-           (slide (get1 mp))]
+           (slide (getZ mp))]
           [else (slide mp)])))
 
 ;; ------------------------------------------------------------
 
 (define/unlifted (fadeout p)
-  (let ([p0 (share (ghost (#;get0 values p)))])
+  (let ([p0 (values #;share (ghost (getA #;values p)))])
     (refocus (cc-superimpose p0 (scale (cellophane p RTime) (add1 (* 2 Time)))) p0)))
 
 (define/unlifted (fadein p)
-  (let ([p1 (share (ghost (#;get1 values p)))])
+  (let ([p1 (values #;share (ghost (getZ #;values p)))])
     (refocus (cc-superimpose p1 (scale (cellophane p Time) (add1 (* 2 RTime)))) p1)))
 
 (define/unlifted (fadeswap p1 p2)
@@ -56,4 +59,5 @@
                   ", isn't it?")))
 
 (slide/mpict
- (fadein (fadeout (t "whoa"))))
+ (// (fadein (fadeout (t "whoa")))
+     (fadein (t "whoa"))))
