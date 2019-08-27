@@ -1,6 +1,8 @@
 #lang racket/base
 (require "private/tv.rkt"
          pict
+         ppict/align ppict/tag
+         slideshow/code
          slideshow/base)
 
 ;; An MPict is TimedValue[Pict]
@@ -61,3 +63,78 @@
 (slide/mpict
  (// (fadein (fadeout (t "whoa")))
      (fadein (t "whoa"))))
+
+;; ----
+
+(define (call f x) (f x))
+
+#|
+f(x) = ax^2 + bx + c
+(0,0) (?, -0.2) (1,1)
+----
+f(0) = 0 ==> c = 0
+f(1) = 1 ==> a + b = 1 ==> b = 1-a
+f(x) = ax^2 + (1-a)x
+f'(x) = 2ax + 1 - a = a(2x - 1) + 1
+f'(m) = 0 ==> 2am + 1 - a = 0 ==> a = -1/(2m-1)
+f'(m) = 0 ==> 2am + 1 - a = 0 ==> m = (a-1)/(2a)
+f(m) = -0.2 ==> am^2 + (1-a)m = -0.2
+            ==> a(a-1)^2/(2a)^2 + (1-a)(a-1)/(2a) = -0.2
+            ==> (7+2*sqrt(6))/5
+|#
+(define (e:quadhop u [q 1])
+  ;; 0.2 => (define a (/ (+ 7 (* 2 (sqrt 6))) 5))
+  ;; 2q+2\sqrt{q\left(q+1\right)}+1
+  (define a (+ (* 2 q) (* 2 (sqrt (* q (+ q 1)))) 1))
+  (+ (* a u u) (* (- 1 a) u)))
+
+(define (interpolate u a b) (+ a (* u (- b a))))
+
+#;
+(define (fly p tp1 tp2)
+  (define ((do-fly u) base)
+    (define-values (x1 y1) (cc-find base (find-tag base tp1)))
+    (define-values (x2 y2) (cc-find base (find-tag base tp2)))
+    (cond [#t ;;(< 0 u 1)
+           (pin-over/align base (interpolate u x1 x2) (interpolate (e:quadhop u) y1 y2)
+                           'c 'c p)]
+          [else base]))
+  (do-fly Time))
+
+(define (fly p tp1 tp2)
+  (let/lift ([u Time])
+    (lambda (base)
+      (define-values (x1 y1) (cc-find base (find-tag base tp1)))
+      (define-values (x2 y2) (cc-find base (find-tag base tp2)))
+      (cond [#t ;;(< 0 u 1)
+             (pin-over/align base (interpolate u x1 x2) (interpolate (e:quadhop u) y1 y2)
+                             'c 'c p)]
+            [else base]))))
+
+(define (add-animations base . anims)
+  (for/fold ([base base]) ([anim (in-list anims)])
+    (call anim base)))
+
+(define (add-animation base anim)
+  (call anim base))
+
+(define idfun (code (lambda (x) x)))
+
+#;
+(slide/mpict
+ (add-animations
+  (vl-append
+   20
+   (para (code (define id #,(tag-pict idfun 'idfun1))))
+   (// (para (code))
+       (para (tag-pict idfun 'idfun2) "is the identity function")))
+  (// values
+      (fly idfun 'idfun1 'idfun2))))
+
+(slide/mpict
+ (add-animations
+  (vl-append
+   20
+   (para (code (define id #,(tag-pict idfun 'idfun1))))
+   (para (tag-pict (if1 idfun (ghost idfun)) 'idfun2) "is the identity function"))
+  (fly idfun 'idfun1 'idfun2)))

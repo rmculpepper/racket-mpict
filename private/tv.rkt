@@ -93,7 +93,7 @@
 (define (tvapp2 f arg1 arg2)
   (cond [(or (dv? arg1) (dv? arg2))
          (dv* (tvapp f (dv-left arg1) (dv-left arg2))
-              (tvapp f (dv-right arg2) (dv-right arg2)))]
+              (tvapp f (dv-right arg1) (dv-right arg2)))]
         [(or (tv? arg1) (tv? arg2))
          (tv (lambda (u) (f ((get u) arg1) ((get u) arg2)))
              (f (-getA arg1) (-getA arg2))
@@ -115,9 +115,9 @@
 
 (define-syntax define/unlifted
   (syntax-parser
-    [(_ (f:id arg:id ...) . body)
+    [(_ (f:id . formals) . body)
      (with-syntax ([(unlifted-f) (generate-temporaries #'(f))])
-       #'(begin (define (unlifted-f arg ...) . body)
+       #'(begin (define (unlifted-f . formals) . body)
                 (define-syntax f (unlifted-transformer (quote-syntax unlifted-f)))))]))
 
 (define-syntax tvapp
@@ -151,3 +151,10 @@
 (define-syntax getZ (unlifted-transformer #'-getZ))
 (define-syntax share (unlifted-transformer #'-share))
 (define-syntax // (unlifted-transformer #'dv))
+(define-syntax S (unlifted-transformer #'-S))
+
+(define (if0 v0 velse) (tv (lambda (u) (if (= u 0) v0 velse)) v0 velse))
+(define (if1 v1 velse) (tv (lambda (u) (if (= u 1) v1 velse)) velse v1))
+
+(define-syntax-rule (let/lift ([x rhs] ...) . body)
+  (tvapp (lambda (x ...) . body) rhs ...))
