@@ -1,9 +1,11 @@
 #lang racket/base
 (require "private/tv.rkt"
+         racket/match
          pict
          ppict/align ppict/tag
          slideshow/code
          slideshow/base)
+(provide (all-defined-out))
 
 ;; An MPict is TimedValue[Pict]
 (define FPS 60)
@@ -34,6 +36,50 @@
 
 ;; ----
 
+(define (call f x) (f x))
+
+(define (interpolate u a b) (+ a (* u (- b a))))
+
+(require "easing.rkt")
+(define (fly p tp1 tp2)
+  (let/lift ([u Time])
+    (lambda (base)
+      (define-values (x1 y1) (cc-find base (find-tag base tp1)))
+      (define-values (x2 y2) (cc-find base (find-tag base tp2)))
+      (cond [#t ;;(< 0 u 1)
+             (pin-over/align base (interpolate u x1 x2) (interpolate (ease-in-quad/hop u) y1 y2)
+                             'c 'c p)]
+            [else base]))))
+
+(define (fly* from to ps [q 1])
+  (let/lift ([u Time])
+    (lambda (base)
+      (for/fold ([base base]) ([p (in-list ps)])
+        (define-values (x1 y1) (cc-find base (list from p)))
+        (define-values (x2 y2) (cc-find base (list to p)))
+        (pin-over/align base (interpolate u x1 x2) (interpolate (ease-in-quad/hop u q) y1 y2)
+                        'c 'c p)))))
+
+(define (add-animations base . anims)
+  (for/fold ([base base]) ([anim (in-list anims)])
+    (call anim base)))
+
+(define (add-animation base anim)
+  (call anim base))
+
+(define/unlifted (cshadow mp)
+  (begin/unlifted
+    (match-define (tv f v0 v1) mp)
+    (define (f* u)
+      (for/fold ([base (ghost v0)])
+                ([uu (in-range 0 (+ u (/ FPS)) (/ FPS))] [k (in-range (- 1 u) 1 (/ FPS))])
+        (define k* (max k 0.25))
+        (let ([p (f uu)]) (refocus (cc-superimpose base (cellophane p k*)) p))))
+    (tv f* v0 (f* 1))))
+
+;; ----
+
+(module+ main
 (slide/mpict
  (vc-append 20
             (cellophane (t "hello world") Time)
@@ -64,55 +110,6 @@
  (// (fadein (fadeout (t "whoa")))
      (fadein (t "whoa"))))
 
-;; ----
-
-(define (call f x) (f x))
-
-(define (e:quadhop u [q 1])
-  ;; f(x) = ax^2 + bx + c, where f(0)=0, f(?)=-q, f(1)=1
-  ;; ==> a = 2q+2\sqrt{q\left(q+1\right)}+1
-  (define a (+ (* 2 q) (* 2 (sqrt (* q (+ q 1)))) 1))
-  (+ (* a u u) (* (- 1 a) u)))
-
-(define (interpolate u a b) (+ a (* u (- b a))))
-
-#;
-(define (fly p tp1 tp2)
-  (define ((do-fly u) base)
-    (define-values (x1 y1) (cc-find base (find-tag base tp1)))
-    (define-values (x2 y2) (cc-find base (find-tag base tp2)))
-    (cond [#t ;;(< 0 u 1)
-           (pin-over/align base (interpolate u x1 x2) (interpolate (e:quadhop u) y1 y2)
-                           'c 'c p)]
-          [else base]))
-  (do-fly Time))
-
-(define (fly p tp1 tp2)
-  (let/lift ([u Time])
-    (lambda (base)
-      (define-values (x1 y1) (cc-find base (find-tag base tp1)))
-      (define-values (x2 y2) (cc-find base (find-tag base tp2)))
-      (cond [#t ;;(< 0 u 1)
-             (pin-over/align base (interpolate u x1 x2) (interpolate (e:quadhop u) y1 y2)
-                             'c 'c p)]
-            [else base]))))
-
-(define (fly* from to ps [q 1])
-  (let/lift ([u Time])
-    (lambda (base)
-      (for/fold ([base base]) ([p (in-list ps)])
-        (define-values (x1 y1) (cc-find base (list from p)))
-        (define-values (x2 y2) (cc-find base (list to p)))
-        (pin-over/align base (interpolate u x1 x2) (interpolate (e:quadhop u q) y1 y2)
-                        'c 'c p)))))
-
-(define (add-animations base . anims)
-  (for/fold ([base base]) ([anim (in-list anims)])
-    (call anim base)))
-
-(define (add-animation base anim)
-  (call anim base))
-
 (let ([idfun (code (lambda (x) x))])
   (slide/mpict
    (add-animations
@@ -134,3 +131,4 @@
      (blank 200)
      (para code2))
     (fly* code1 code2 (list var1 var2 rhs1 rhs2 body) 0.5))))
+)
