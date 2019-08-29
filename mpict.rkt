@@ -68,23 +68,9 @@
 
 (define (call f x) (f x))
 
-#|
-f(x) = ax^2 + bx + c
-(0,0) (?, -0.2) (1,1)
-----
-f(0) = 0 ==> c = 0
-f(1) = 1 ==> a + b = 1 ==> b = 1-a
-f(x) = ax^2 + (1-a)x
-f'(x) = 2ax + 1 - a = a(2x - 1) + 1
-f'(m) = 0 ==> 2am + 1 - a = 0 ==> a = -1/(2m-1)
-f'(m) = 0 ==> 2am + 1 - a = 0 ==> m = (a-1)/(2a)
-f(m) = -0.2 ==> am^2 + (1-a)m = -0.2
-            ==> a(a-1)^2/(2a)^2 + (1-a)(a-1)/(2a) = -0.2
-            ==> (7+2*sqrt(6))/5
-|#
 (define (e:quadhop u [q 1])
-  ;; 0.2 => (define a (/ (+ 7 (* 2 (sqrt 6))) 5))
-  ;; 2q+2\sqrt{q\left(q+1\right)}+1
+  ;; f(x) = ax^2 + bx + c, where f(0)=0, f(?)=-q, f(1)=1
+  ;; ==> a = 2q+2\sqrt{q\left(q+1\right)}+1
   (define a (+ (* 2 q) (* 2 (sqrt (* q (+ q 1)))) 1))
   (+ (* a u u) (* (- 1 a) u)))
 
@@ -111,6 +97,15 @@ f(m) = -0.2 ==> am^2 + (1-a)m = -0.2
                              'c 'c p)]
             [else base]))))
 
+(define (fly* from to ps [q 1])
+  (let/lift ([u Time])
+    (lambda (base)
+      (for/fold ([base base]) ([p (in-list ps)])
+        (define-values (x1 y1) (cc-find base (list from p)))
+        (define-values (x2 y2) (cc-find base (list to p)))
+        (pin-over/align base (interpolate u x1 x2) (interpolate (e:quadhop u q) y1 y2)
+                        'c 'c p)))))
+
 (define (add-animations base . anims)
   (for/fold ([base base]) ([anim (in-list anims)])
     (call anim base)))
@@ -118,23 +113,24 @@ f(m) = -0.2 ==> am^2 + (1-a)m = -0.2
 (define (add-animation base anim)
   (call anim base))
 
-(define idfun (code (lambda (x) x)))
+(let ([idfun (code (lambda (x) x))])
+  (slide/mpict
+   (add-animations
+    (vl-append
+     20
+     (para (code (define id #,(tag-pict idfun 'idfun1))))
+     (para (tag-pict (if1 idfun (ghost idfun)) 'idfun2) "is the identity function"))
+    (fly idfun 'idfun1 'idfun2))))
 
-#;
-(slide/mpict
- (add-animations
-  (vl-append
-   20
-   (para (code (define id #,(tag-pict idfun 'idfun1))))
-   (// (para (code))
-       (para (tag-pict idfun 'idfun2) "is the identity function")))
-  (// values
-      (fly idfun 'idfun1 'idfun2))))
-
-(slide/mpict
- (add-animations
-  (vl-append
-   20
-   (para (code (define id #,(tag-pict idfun 'idfun1))))
-   (para (tag-pict (if1 idfun (ghost idfun)) 'idfun2) "is the identity function"))
-  (fly idfun 'idfun1 'idfun2)))
+(let ([var1 (code x)] [var2 (code y)] [rhs1 (code (+ 1 2))] [rhs2 (code (* 3 4))])
+  (define body (code (/ x y)))
+  (define code1 (code (let ([#,var1 #,rhs1] [#,var2 #,rhs2]) #,body)))
+  (define code2 (code ((lambda (#,var1 #,var2) #,body) #,rhs1 #,rhs2)))
+  (slide/mpict
+   (add-animations
+    (vl-append
+     20
+     (para code1)
+     (blank 200)
+     (para code2))
+    (fly* code1 code2 (list var1 var2 rhs1 rhs2 body) 0.5))))
