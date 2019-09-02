@@ -80,6 +80,8 @@
 ;; ----
 
 (module+ main
+(slide (t "ready?"))
+#|
 (slide/mpict
  (vc-append 20
             (cellophane (t "hello world") Time)
@@ -98,6 +100,7 @@
  (vc-append 20
             (para "This is" (fadeout (colorize (bt "not bad.") "darkred")))
             (para "This is" (fadein (colorize (bt "pretty cool!") "blue")))))
+|#
 
 (slide/mpict
  (vc-append 20
@@ -106,6 +109,7 @@
                             (colorize (bt "pretty cool") "blue"))
                   ", isn't it?")))
 
+#;
 (slide/mpict
  (// (fadein (fadeout (t "whoa")))
      (fadein (t "whoa"))))
@@ -131,4 +135,11 @@
      (blank 200)
      (para code2))
     (fly* code1 code2 (list var1 var2 rhs1 rhs2 body) 0.5))))
+
+(require pict/face)
+(slide/mpict
+ (fadeout
+  (scale
+   (face (stepfun '(happy sortof-happy sortof-unhappy #;unhappy unhappier unhappiest surprised)))
+   3/4)))
 )

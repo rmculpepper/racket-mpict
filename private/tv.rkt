@@ -5,6 +5,19 @@
 (provide (except-out (all-defined-out) tv:app)
          (rename-out [tv:app #%app]))
 
+;; Idea: instead of escaping via define/unlifted, add frame annotations (cf Remora)?
+;; Are there inner vs outer frame constraints?
+
+;; fadeout : Smooth -> _
+;; get0 : * -> _
+;; // : * * -> _
+;; share : Smooth -> _
+;; cshadow : ???
+;; autoinset : * -> *   --- auto determines biggest bounding box (assumes Smooth max is at endpoint)
+
+
+;; What would I even *expect* from (fadeout (// A B)), though?
+
 ;; A UReal is a Real in the range [0,1].
 
 ;; A SmoothValue[X] is one of
@@ -158,3 +171,10 @@
 
 (define-syntax-rule (let/lift ([x rhs] ...) . body)
   (tvapp (lambda (x ...) . body) rhs ...))
+
+(define (stepfun vs)
+  (let ([vs (list->vector vs)] [n (length vs)])
+    (tv (lambda (u)
+          (vector-ref vs (min n (inexact->exact (floor (* n u))))))
+        (vector-ref vs 0)
+        (vector-ref vs (sub1 n)))))
