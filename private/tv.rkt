@@ -15,23 +15,49 @@
 ;; cshadow : ???
 ;; autoinset : * -> *   --- auto determines biggest bounding box (assumes Smooth max is at endpoint)
 
-
 ;; What would I even *expect* from (fadeout (// A B)), though?
 
 ;; A UReal is a Real in the range [0,1].
+;; A NNReal is a Real >= 0.
 
 ;; A SmoothValue[X] is one of
 ;; - X
-;; - (tv (UReal -> X) X X)
-(struct tv (f v0 v1))
+;; - (tv NNReal (UReal -> X) X X)
+(struct tv (dur f v0 v1))
 
 ;; A TimedValue[X] is one of
 ;; - SmoothValue[X]
 ;; - (dv TimedValue[X] TimedValue[X])   -- "discrete" time steps
 (struct dv (fst snd))
 
-(define Time (tv values 0 1))
-(define RTime (tv (lambda (u) (- 1 u)) 1 0))
+(define Time (tv 1 values 0 1))
+(define RTime (tv 1 (lambda (u) (- 1 u)) 1 0))
+
+(define (-get-dur v)
+  (match v
+    [(? dv?) (error 'get-dur "expected smooth value, got: ~e" v)]
+    [(tv dur _ _ _) dur]
+    [_ 0]))
+
+(define (-timescale s v)
+  (match v
+    [(? dv?) (error 'timescale "expected smooth value, got: ~e" v)]
+    [(tv dur f v0 v1) (tv (* dur s) f v0 v1)]
+    [_ v]))
+
+(define (-timeclip dur* v)
+  (match v
+    [(? dv?) (error 'timeclip "expected smooth value, got: ~e" v)]
+    [(tv dur f v0 v1)
+     (cond [(< dur* dur)
+            (define (f* u) (f (* u (/ dur* dur))))
+            (tv dur* f* v0 (f* 1))]
+           [(= dur* dur)
+            v]
+           [(> dur* dur)
+            (define (f* u) (f (min 1 (* u (/ dur* dur)))))
+            (tv dur* f* v0 v1)])]
+    [_ v]))
 
 ;; TODO: easing functions!
 
@@ -49,7 +75,7 @@
 (define (dv-right v)
   (match v
     [(dv v1 v2) v2]
-    [(tv f v0 v1) v1]
+    [(tv dur f v0 v1) v1]
     [v v]))
 
 ;; ----------------------------------------
@@ -59,28 +85,28 @@
     [(dv v1 v2)
      (let ([v1* (-share v1)] [v2* (-share v2)])
        (if (and (eq? v1* v1) (eq? v2* v2)) v (dv v1* v2*)))]
-    [(tv f v0 v1)
-     (tv (let ([h (make-hasheqv)])
-           (lambda (u) (hash-ref! h u (lambda () (f u)))))
-         v0 v1)]
+    [(tv dur f v0 v1)
+     (define h (make-hasheqv))
+     (define (f* u) (hash-ref! h u (lambda () (f u))))
+     (tv dur f* v0 v1)]
     [_ v]))
 
 ;; get : UReal -> SmoothValue[X] -> X
 (define ((get u) arg)
   (match arg
-    [(tv f _ _) (f u)]
+    [(tv dur f _ _) (f u)]
     [v v]))
 
 ;; -get{A,Z} : TimedValue[X] -> X
 (define (-getA arg)
   (match arg
     [(dv v1 _) (-getA v1)]
-    [(tv _ v0 _) v0]
+    [(tv _ _ v0 _) v0]
     [v v]))
 (define (-getZ arg)
   (match arg
     [(dv _ v2) (-getZ v2)]
-    [(tv _ _ v1) v1]
+    [(tv _ _ _ v1) v1]
     [v v]))
 
 ;; tvapply : (X ... -> Y) (List TimedValue[X] ...) -> TimedValue[Y]
@@ -89,11 +115,15 @@
          (dv (tvapply f (map dv-left args))
              (tvapply f (map dv-right args)))]
         [(ormap tv? args)
-         (tv (lambda (u) (apply f (map (get u) args)))
+         (define dur* (apply max (map -get-dur args)))
+         (define args* (map (lambda (a) (-timeclip dur* a)) args))
+         (tv dur*
+             (lambda (u) (apply f (map (get u) args*)))
              (apply f (map -getA args))
              (apply f (map -getZ args)))]
         [else (apply f args)]))
 
+#|
 ;; tvapp{1,2,N} : (X ... -> Y) TimedValue[X] ... -> TimedValue[Y]
 (define (tvapp1 f arg)
   (match arg
@@ -112,6 +142,7 @@
              (f (-getA arg1) (-getA arg2))
              (f (-getZ arg1) (-getZ arg2)))]
         [else (f arg1 arg2)]))
+|#
 (define (tvappN f . args)
   (tvapply f args))
 
@@ -137,8 +168,8 @@
   (syntax-parser
     ;; functions declared with define/unlifted are macros, don't go through tvapp
     [(_ f:expr) #'(#%plain-app f)]
-    [(_ f:expr arg:expr) #'(#%plain-app tvapp1 f arg)]
-    [(_ f:expr arg1:expr arg2:expr) #'(#%plain-app tvapp2 f arg1 arg2)]
+    ;;[(_ f:expr arg:expr) #'(#%plain-app tvapp1 f arg)]
+    ;;[(_ f:expr arg1:expr arg2:expr) #'(#%plain-app tvapp2 f arg1 arg2)]
     [(_ f:expr arg:expr ...) #'(#%plain-app tvappN f arg ...)]
     [(_ f:expr (~alt parg:expr (~seq kw:keyword kwarg:expr)) ...)
      (with-syntax ([(ptmp ...) (generate-temporaries #'(parg ...))]
@@ -166,15 +197,18 @@
 (define-syntax // (unlifted-transformer #'dv))
 (define-syntax S (unlifted-transformer #'-S))
 
-(define (if0 v0 velse) (tv (lambda (u) (if (= u 0) v0 velse)) v0 velse))
-(define (if1 v1 velse) (tv (lambda (u) (if (= u 1) v1 velse)) velse v1))
+(define (if0 v0 velse) (tv 1 (lambda (u) (if (= u 0) v0 velse)) v0 velse))
+(define (if1 v1 velse) (tv 1 (lambda (u) (if (= u 1) v1 velse)) velse v1))
 
 (define-syntax-rule (let/lift ([x rhs] ...) . body)
   (tvapp (lambda (x ...) . body) rhs ...))
 
 (define (stepfun vs)
   (let ([vs (list->vector vs)] [n (length vs)])
-    (tv (lambda (u)
-          (vector-ref vs (min n (inexact->exact (floor (* n u))))))
+    (tv 1
+        (lambda (u) (vector-ref vs (min n (inexact->exact (floor (* n u))))))
         (vector-ref vs 0)
         (vector-ref vs (sub1 n)))))
+
+(define-syntax timescale (unlifted-transformer #'-timescale))
+(define-syntax timeclip  (unlifted-transformer #'-timeclip))

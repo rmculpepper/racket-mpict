@@ -12,14 +12,15 @@
 
 (define/unlifted (slide/mpict mp)
   (begin/unlifted
-    (cond [(dv? mp)
-           (slide/mpict (dv-left mp))
-           (slide/mpict (dv-right mp))]
-          [(tv? mp)
-           (for ([u (in-range 0 1 (/ FPS))])
-             (slide #:timeout (/ FPS) ((get u) mp)))
-           (slide (getZ mp))]
-          [else (slide mp)])))
+    (match mp
+      [(dv v1 v2)
+       (slide/mpict v1)
+       (slide/mpict v2)]
+      [(tv dur f v0 v1)
+       (for ([u (in-range 0 1 (/ (* dur FPS)))])
+         (slide #:timeout (/ FPS) ((get u) mp)))
+       (slide v1)]
+      [_ (slide mp)])))
 
 ;; ------------------------------------------------------------
 
@@ -41,8 +42,8 @@
 (define (interpolate u a b) (+ a (* u (- b a))))
 
 (require "easing.rkt")
-(define (fly p tp1 tp2)
-  (let/lift ([u Time])
+(define/unlifted (fly p tp1 tp2)
+  (let/lift ([u Time] [p p] [tp1 tp1] [tp2 tp2])
     (lambda (base)
       (define-values (x1 y1) (cc-find base (find-tag base tp1)))
       (define-values (x2 y2) (cc-find base (find-tag base tp2)))
@@ -69,13 +70,13 @@
 
 (define/unlifted (cshadow mp)
   (begin/unlifted
-    (match-define (tv f v0 v1) mp)
+    (match-define (tv dur f v0 v1) mp)
     (define (f* u)
       (for/fold ([base (ghost v0)])
                 ([uu (in-range 0 (+ u (/ FPS)) (/ FPS))] [k (in-range (- 1 u) 1 (/ FPS))])
         (define k* (max k 0.25))
         (let ([p (f uu)]) (refocus (cc-superimpose base (cellophane p k*)) p))))
-    (tv f* v0 (f* 1))))
+    (tv dur f* v0 (f* 1))))
 
 ;; ----
 
@@ -142,4 +143,30 @@
   (scale
    (face (stepfun '(happy sortof-happy sortof-unhappy #;unhappy unhappier unhappiest surprised)))
    3/4)))
+(slide/mpict
+ (timescale 2
+            (fadeout
+             (scale
+              (face (stepfun '(happy sortof-happy sortof-unhappy #;unhappy unhappier unhappiest surprised)))
+              3/4))))
+
+(let ([idfun (code (lambda (x) x))])
+  (slide/mpict
+   (timescale 4
+   (add-animations
+    (vl-append
+     20
+     (para (code (define id #,(tag-pict idfun 'idfun1))))
+     (para (tag-pict (ghost idfun) 'idfun2) "is the identity function"))
+    (fly (fadein idfun) 'idfun1 'idfun2)))))
+
+(let ([idfun (code (lambda (x) x))])
+  (slide/mpict
+   (add-animations
+    (vl-append
+     20
+     (para (code (define id #,(tag-pict idfun 'idfun1))))
+     (para (tag-pict (ghost idfun) 'idfun2) "is the identity function"))
+    (fly (timescale 2 (fadein idfun)) 'idfun1 'idfun2))))
+
 )
