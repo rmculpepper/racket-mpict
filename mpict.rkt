@@ -16,7 +16,7 @@
       [(dv v1 v2)
        (slide/mpict v1)
        (slide/mpict v2)]
-      [(tv dur f v0 v1)
+      [(av dur f v0 v1)
        (for ([u (in-range 0 1 (/ (* dur FPS)))])
          (slide #:timeout (/ FPS) ((get u) mp)))
        (slide v1)]
@@ -34,6 +34,13 @@
 
 (define/unlifted (fadeswap p1 p2)
   (lbl-superimpose (fadeout p1) (fadein p2)))
+
+(define/unlifted (hop p)
+  (let ([p0 (values (ghost (getA p)))])
+    (pin-over/align p0 0 (* (pict-height p0) (hop-quad Time)) 'c 'c p)))
+
+(define (hop-quad u)
+  (* 4 u (sub1 u)))
 
 ;; ----
 
@@ -70,13 +77,13 @@
 
 (define/unlifted (cshadow mp)
   (begin/unlifted
-    (match-define (tv dur f v0 v1) mp)
+    (match-define (av dur f v0 v1) mp)
     (define (f* u)
       (for/fold ([base (ghost v0)])
                 ([uu (in-range 0 (+ u (/ FPS)) (/ FPS))] [k (in-range (- 1 u) 1 (/ FPS))])
         (define k* (max k 0.25))
         (let ([p (f uu)]) (refocus (cc-superimpose base (cellophane p k*)) p))))
-    (tv dur f* v0 (f* 1))))
+    (av dur f* v0 (f* 1))))
 
 ;; ----
 
@@ -138,6 +145,7 @@
     (fly* code1 code2 (list var1 var2 rhs1 rhs2 body) 0.5))))
 
 (require pict/face)
+#;
 (slide/mpict
  (fadeout
   (scale
@@ -150,6 +158,7 @@
               (face (stepfun '(happy sortof-happy sortof-unhappy #;unhappy unhappier unhappiest surprised)))
               3/4))))
 
+#|
 (let ([idfun (code (lambda (x) x))])
   (slide/mpict
    (timescale 4
@@ -168,5 +177,12 @@
      (para (code (define id #,(tag-pict idfun 'idfun1))))
      (para (tag-pict (ghost idfun) 'idfun2) "is the identity function"))
     (fly (timescale 2 (fadein idfun)) 'idfun1 'idfun2))))
+|#
+
+(slide/mpict
+ (hc-append 20
+            (timeclip 2 (hop (t "hello")) 'left)
+            (timeclip 2 (hop (t "world")) 'right)
+            (timeclip 2 (hop (t "whee!")) 'stretch)))
 
 )
