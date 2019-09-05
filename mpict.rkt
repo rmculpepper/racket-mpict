@@ -18,7 +18,7 @@
        (slide/mpict v2)]
       [(av dur f v0 v1)
        (for ([u (in-range 0 1 (/ (* dur FPS)))])
-         (slide #:timeout (/ FPS) ((get u) mp)))
+         (slide #:timeout (/ FPS) (get u mp)))
        (slide v1)]
       [_ (slide mp)])))
 
