@@ -13,9 +13,9 @@
 (define/unlifted (slide/mpict mp)
   (begin/unlifted
     (match mp
-      [(dv v1 v2)
-       (slide/mpict v1)
-       (slide/mpict v2)]
+      [(dv steps)
+       (for ([step (in-list steps)])
+         (slide/mpict step))]
       [(av dur f v0 v1)
        (for ([u (in-range 0 1 (/ (* dur FPS)))])
          (slide #:timeout (/ FPS) (get u mp)))
@@ -75,6 +75,7 @@
 (define (add-animation base anim)
   (call anim base))
 
+#;
 (define/unlifted (cshadow mp)
   (begin/unlifted
     (match-define (av dur f v0 v1) mp)
@@ -84,6 +85,14 @@
         (define k* (max k 0.25))
         (let ([p (f uu)]) (refocus (cc-superimpose base (cellophane p k*)) p))))
     (av dur f* v0 (f* 1))))
+
+(define/unlifted (cshadow mp)
+  (cshadow* (cumulative mp FPS)))
+
+(define (cshadow* ps)
+  (for/fold ([base (ghost (car ps))])
+            ([p (in-list ps)] [opacity (in-range 1 0 (/ -1 FPS))])
+    (pin-over base 0 0 (cellophane p (max 0.2 opacity)))))
 
 ;; ----
 
@@ -117,7 +126,6 @@
                             (colorize (bt "pretty cool") "blue"))
                   ", isn't it?")))
 
-#;
 (slide/mpict
  (// (fadein (fadeout (t "whoa")))
      (fadein (t "whoa"))))
@@ -155,7 +163,7 @@
  (timescale 2
             (fadeout
              (scale
-              (face (stepfun '(happy sortof-happy sortof-unhappy #;unhappy unhappier unhappiest surprised)))
+              (face (stepfun '(happy sortof-happy sortof-unhappy unhappier unhappiest surprised)))
               3/4))))
 
 #|
@@ -183,6 +191,7 @@
  (hc-append 20
             (timeclip 2 (hop (t "hello")) 'left)
             (timeclip 2 (hop (t "world")) 'right)
-            (timeclip 2 (hop (t "whee!")) 'stretch)))
+            (timeclip 2 (cshadow (hop (t "whee!"))) 'stretch)
+            (>> 1 (hop (t "whoa!")))))
 
 )

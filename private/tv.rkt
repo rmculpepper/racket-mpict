@@ -1,6 +1,7 @@
 #lang racket/base
 (require (for-syntax racket/base syntax/parse syntax/transformer)
          racket/match
+         racket/list
          racket/stxparam)
 (provide (except-out (all-defined-out) tv:app)
          (rename-out [tv:app #%app]))
@@ -42,10 +43,10 @@
     [_ 0]))
 
 ;; avapply : (X ... -> Y) (List AnimatedValue[X] ...) -> AnimatedValue[Y]
-(define (avapply f args [gravity 'left])
+(define (avapply f args)
   (cond [(ormap av? args)
          (define dur* (apply max (map -dur args)))
-         (define args* (map (lambda (a) (-timeclip dur* a gravity)) args))
+         (define args* (map (lambda (a) (-timeclip dur* a)) args))
          (av dur*
              (lambda (u)
                (parameterize ((current-Time u))
@@ -78,7 +79,7 @@
     [(av dur f v0 v1) (av (* dur s) f v0 v1)]
     [_ v]))
 
-(define (-timeclip dur* v gravity)
+(define (-timeclip dur* v [gravity 'left])
   (match v
     [(? dv?) (error 'timeclip "expected animated value, got: ~e" v)]
     [(av dur f v0 v1)
@@ -114,59 +115,70 @@
 
 ;; A TimedValue[X] is one of
 ;; - AnimatedValue[X]
-;; - (dv TimedValue[X] TimedValue[X])   -- "discrete" time steps
-(struct dv (fst snd))
+;; - (dv (NonemptyListof TimedValue[X]))   -- "discrete" time steps
+(struct dv (steps))
+
+;; Note: This allows trees of discrete-timed animations, as opposed to
+;; dv containing (NEVectorof AnimatedValue[X])!
+
+(define (dv-length v)
+  (match v [(dv steps) (length steps)] [_ 1]))
+(define (dv-ref v k)
+  (match v
+    [(dv steps)
+     (if (< k (length steps)) (list-ref steps k) (-getZ (last steps)))]
+    [v (if (zero? k) v (-getZ v))]))
+
+(define ->>
+  (case-lambda
+    [(v)      (>>* 1 v)]
+    [(n v)    (>>* n v)]
+    [(n v0 v) (>>* n v v0)]))
+(define (>>* n v [v0 (-getA v)])
+  (match v
+    [(dv steps) (dv (append (make-list n v0) steps))]
+    [_ (dv (append (make-list n v0) (list v)))]))
+
+(define (-// . vs)
+  (dv vs))
+(define (-++ . vs)
+  (dv (apply append (map (lambda (a) (if (dv? a) (dv-steps a) (list a))) vs))))
 
 ;; tvapply : (X ... -> Y) (List TimedValue[X] ...) -> TimedValue[Y]
-(define (tvapply f args [gravity 'left])
+(define (tvapply f args)
   (cond [(ormap dv? args)
-         (dv (tvapply f (map dv-left args) gravity)
-             (tvapply f (map dv-right args) gravity))]
-        [else (avapply f args gravity)]))
+         (define len* (apply max (map dv-length args)))
+         (dv (for/list ([i (in-range len*)])
+               (tvapply f (map (lambda (a) (dv-ref a i)) args))))]
+        [else (avapply f args)]))
 
-#|
 ;; tvapp{1,2,N} : (X ... -> Y) TimedValue[X] ... -> TimedValue[Y]
 (define (tvapp1 f arg)
   (match arg
-    [(dv v1 v2)
-     (dv (tvapp1 f v1) (tvapp1 f v2))]
-    [(tv argf v0 v1)
-     (tv (lambda (u) (f (argf u)))
-         (f v0) (f v1))]
-    [v (f v)]))
+    [(dv steps)
+     (dv (for/list ([step (in-list steps)])
+           (tvapp1 f step)))]
+    [else (avapp1 f arg)]))
 (define (tvapp2 f arg1 arg2)
   (cond [(or (dv? arg1) (dv? arg2))
-         (dv (tvapp f (dv-left arg1) (dv-left arg2))
-             (tvapp f (dv-right arg1) (dv-right arg2)))]
-        [(or (tv? arg1) (tv? arg2))
-         (tv (lambda (u) (f ((get u) arg1) ((get u) arg2)))
-             (f (-getA arg1) (-getA arg2))
-             (f (-getZ arg1) (-getZ arg2)))]
-        [else (f arg1 arg2)]))
-|#
+         (define len* (max (dv-length arg1) (dv-length arg2)))
+         (dv (for/list ([i (in-range len*)])
+               (tvapp2 f (dv-ref arg1 i) (dv-ref arg2 i))))]
+        [else (avapp2 f arg1 arg2)]))
 (define (tvappN f . args)
-  (tvapply f args 'left))
-
-(define (dv-left v)
-  (match v
-    [(dv v1 v2) v1]
-    [(? av? v) v]
-    [v v]))
-(define (dv-right v)
-  (match v
-    [(dv v1 v2) v2]
-    [(av dur f v0 v1) v1]
-    [v v]))
+  (tvapply f args))
 
 (define (const? x) (not (or (av? x) (dv? x))))
 (define (smooth? x) (not (dv? x)))
 
 ;; ============================================================
 
+;; -share : TimedValue[X] -> TimedValue[X]
+;; Useful when eq?-ness is important.
 (define (-share v)
   (match v
-    [(dv v1 v2)
-     (dv (-share v1) (-share v2))]
+    [(dv steps)
+     (dv (map -share steps))]
     [(av dur f v0 v1)
      (define h (make-hasheqv))
      (define (f* u) (hash-ref! h u (lambda () (f u))))
@@ -176,14 +188,30 @@
 ;; -get{A,Z} : TimedValue[X] -> X
 (define (-getA arg)
   (match arg
-    [(dv v1 _) (-getA v1)]
+    [(dv (cons step1 _)) (-getA step1)]
     [(av _ _ v0 _) v0]
     [v v]))
 (define (-getZ arg)
   (match arg
-    [(dv _ v2) (-getZ v2)]
+    [(dv steps) (-getZ (last steps))]
     [(av _ _ _ v1) v1]
     [v v]))
+
+(define (-cumulative v fps)
+  (match v
+    [(av dur f v0 v1)
+     ;; An Index is a Nat ranging from 0 to (ceiling (* dur fps))
+     (define h (make-hasheqv)) ;; Nat -> (Listof X)
+     (for/fold ([acc null]) ([i (in-range 0 (add1 (ceiling (* dur fps))))])
+       (define u (min 1 (/ i dur fps)))
+       (define acc* (cons (f u) acc))
+       (hash-set! h i acc*)
+       acc*)
+     (define (f* u)
+       (define i (inexact->exact (floor (* u dur fps))))
+       (hash-ref h i))
+     (av dur f* (f* 0) (f* 1))]
+    [v (list v)]))
 
 ;; ----------------------------------------
 
@@ -234,8 +262,9 @@
 (define-syntax getA (unlifted-transformer #'-getA))
 (define-syntax getZ (unlifted-transformer #'-getZ))
 (define-syntax share (unlifted-transformer #'-share))
-(define-syntax // (unlifted-transformer #'dv))
-(define-syntax S (unlifted-transformer #'-S))
+(define-syntax // (unlifted-transformer #'-//))
+(define-syntax ++ (unlifted-transformer #'-++))
+(define-syntax >> (unlifted-transformer #'->>))
 
 (define (if0 v0 velse) (av 1 (lambda (u) (if (= u 0) v0 velse)) v0 velse))
 (define (if1 v1 velse) (av 1 (lambda (u) (if (= u 1) v1 velse)) velse v1))
@@ -252,3 +281,4 @@
 
 (define-syntax timescale (unlifted-transformer #'-timescale))
 (define-syntax timeclip  (unlifted-transformer #'-timeclip))
+(define-syntax cumulative  (unlifted-transformer #'-cumulative))
