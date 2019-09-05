@@ -13,15 +13,19 @@
    (vc-append
     50
     (t (format "~a" name))
-    (hc-append
-     50
-     (plot (function e) #:x-min 0 #:x-max 1 #:x-label #f #:y-label #f)
-     (let ([DIM 400])
-       (// (blank DIM DIM)
+    (let ([DIM 400])
+      (hc-append
+       50
+       ;;(plot (function e) #:x-min 0 #:x-max 1 #:x-label #f #:y-label #f)
+       (// (rectangle DIM DIM)
            (cshadow
             (pin-over/align (rectangle DIM DIM)
                             (* DIM Time) (* DIM (- 1 (e Time))) 'c 'c
-                            (colorize (disk 10) "red")))))))))
+                            (colorize (disk 10) "red"))))
+       (// (rectangle 10 DIM)
+           (pin-over/align (rectangle 10 DIM)
+                           5 (* DIM (- 1 (e Time))) 'c 'c
+                           (colorize (disk 10) "red"))))))))
 
 (test-ease "identity" values)
 
