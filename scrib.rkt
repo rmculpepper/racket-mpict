@@ -2,8 +2,11 @@
 (require racket/match
          racket/list
          (prefix-in s: scribble/core)
+         (prefix-in s: scribble/html-properties)
+         (prefix-in s: scribble/latex-properties)
          (prefix-in s: scribble/decode)
          pict)
+(provide flow-pict)
 
 (define (hash-cons h k v) (hash-set h k (cons v (hash-ref h k null))))
 
@@ -58,8 +61,9 @@
      (add-simple-style s istyle)]
     [(? symbol?)
      (add-simple-style s istyle)]
+    [#f istyle]
     [_
-     (when #f (eprintf "add-style: warning, ignoring: ~e" s))
+     (when #t (eprintf "add-style: warning, ignoring: ~e\n" s))
      istyle]))
 
 (define (add-simple-style s istyle)
@@ -69,8 +73,13 @@
     [(tt) (hash-set istyle 'base 'modern)]
     [(sf) (hash-set istyle 'base 'swiss)]
     [(roman) (hash-set istyle 'base s)]
+    [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
+    [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
+    [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
+    [("RktIn" "RktPn" "RktSym") (hash-set istyle 'base 'modern)]
+    [(hspace) (hash-set istyle 'base 'modern)]
     [else
-     (when #f (eprintf "add-simple-style: warning, ignoring: ~e" s))
+     (when #t (eprintf "add-simple-style: warning, ignoring: ~e\n" s))
      istyle]))
 
 (define (add-style-prop prop istyle)
@@ -79,8 +88,11 @@
      (hash-set istyle 'color (to-color color))]
     [(s:background-color-property color)
      (hash-set istyle 'bgcolor (to-color color))]
+    [(? s:css-addition?) istyle]
+    [(? s:tex-addition?) istyle]
+    [(== 'tt-chars) istyle]
     [_
-     (when #f (eprintf "add-style-prop: warning, ignoreing: ~e" prop))
+     (when #t (eprintf "add-style-prop: warning, ignoring: ~e\n" prop))
      istyle]))
 
 (define (to-color color) color) ;; FIXME
@@ -108,6 +120,8 @@
      (apply vl-append (get-line-sep)
             (for/list ([block (in-list blocks)])
               (block->pict block istyle)))]
+    [(s:nested-flow style flow)
+     (flow->pict flow (add-style style istyle))]
     [(s:itemization style flows)
      ;; FIXME
      (apply vl-append (get-line-sep) ;; ??
@@ -136,10 +150,13 @@
 (define (content->pict content istyle #:width [width (get-para-width)])
   (define fragments (content->fragments content istyle))
   (define lines (linebreak-fragments fragments width))
-  (apply vl-append
-         (get-line-sep)
-         (for/list ([line (in-list lines)])
-           (apply hbl-append 0 line))))
+  (apply vl-append (get-line-sep)
+         (for/list ([line (in-list lines)]
+                    [index (in-naturals 1)])
+           (line->pict line width istyle (= index (length lines))))))
+
+(define (line->pict line width istyle last?)
+  (apply hbl-append 0 line))
 
 ;; A Fragment is either Pict or (cons String IStyle), where the string
 ;; either contains no whitespace or only whitespace.
@@ -156,6 +173,8 @@
     [(? pict?) (list content)]
     [(s:element style content)
      (content->fragments content (add-style style istyle))]
+    [(s:delayed-element _ _ plain)
+     (content->fragments (plain) istyle)]
     [(? list?)
      (apply append
             (for/list ([part (in-list content)])
@@ -179,7 +198,17 @@
     [(cons str istyle)
      (define ptstyle (append (hash-ref istyle 'mods null) (hash-ref istyle 'base)))
      (define size (* (hash-ref istyle 'scale) (get-base-size)))
-     (text str ptstyle size)]))
+     (let* ([p (text str ptstyle size)]
+            [p (cond [(hash-ref istyle 'color #f)
+                      => (lambda (c) (colorize p c))]
+                     [else p])]
+            [p (cond [(hash-ref istyle 'bgcolor #f)
+                      => (lambda (c) (bg-colorize p c))]
+                     [else p])])
+       p)]))
+
+(define (bg-colorize p c)
+  (pin-under p 0 0 (filled-rectangle (pict-width p) (pict-height p) #:draw-border? #f #:color c)))
 
 ;; linebreak-fragments : (Listof fragments) PositiveReal -> (Listof (Listof Pict))
 (define (linebreak-fragments fragments width)
@@ -230,20 +259,38 @@
 
 (module+ main
   (require slideshow slideshow/code
-           (only-in scribble/base elem italic itemlist [tt s:tt] [item s:item]))
+           (only-in scribble/core color-property background-color-property)
+           (only-in scribble/base elem italic itemlist [tt s:tt] [item s:item])
+           (only-in scribble/manual litchar racketblock)
+           (for-label racket/base))
+
+  (define (blue . content)
+    (apply elem #:style (s:style #f (list (color-property "blue"))) content))
+
+  (define (on-pink . content)
+    (apply elem #:style (s:style #f (list (background-color-property "pink"))) content))
+
   (slide
    @flow-pict[#:style 'roman]{
      This whole slide consists of a @italic{flow}. I consists of
      multiple @s:tt{paragraphs} and @elem[#:style 'sf]{other such stuff}.
 
-     This is a @italic{paragraph}. It is written using Scribble's
-     at-exp reader, which means that when I use @code[para] and
-     @code[it] and picts, I do not have to break things manually, like
-     @code[(para "This" (it "is") "a para")]; I can write them more naturally.
+     This is a @italic{paragraph}. It is written using @blue{Scribble's
+     @litchar["@"]-exp reader}, which means that when I use @code[para] and
+     @code[it] and picts, @on-pink{I do not have to break things @elem[#:style 'larger]{manually}}, like
+     @code[(para "This" (it "is") "a para")]; I can write them @on-pink{more naturally}.
 
      This @code[λ] is good stuff:
      @itemlist[
-     @s:item{it is @italic{functional}}
-     @s:item{it is @italic{higher-order}}
+     @s:item{it is @italic{functional@elem[#:style 'superscript]{ish}}}
+     @s:item{it is @italic{higher-order}@elem[#:style 'subscript]{for sure}}
      ]
+
+     @; -- Needs table!
+     @;{
+     @racketblock[
+     (define (map f xs)
+       (if (pair? xs) (cons (f (car xs)) (map f (cdr xs))) null))
+     ]
+     }
      }))
