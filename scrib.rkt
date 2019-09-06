@@ -2,13 +2,19 @@
 (require racket/match
          racket/list
          (prefix-in s: scribble/core)
+         (prefix-in s: scribble/decode)
          pict)
 
 (define (hash-cons h k v) (hash-set h k (cons v (hash-ref h k null))))
 
-(define (get-base-size) 24)
-(define (get-para-width) 700)
-(define (get-line-sep) 4)
+(define (get-base-size) 32)   ;; (current-font-size) = 32
+(define (get-para-width) 800) ;; (current-para-width) = 738
+(define (get-line-sep) 5)     ;; (current-line-sep) = 5
+(define (get-block-sep) 24)   ;; (current-gap-size) = 24
+
+;; (current-main-font) = 'swiss
+;; (current-title-color) = "black"
+;; (current-code-font) = (bold . modern)
 
 ;; ------------------------------------------------------------
 ;; Styles
@@ -60,8 +66,9 @@
   (case s
     [(italic bold subscript superscript #||# combine no-combine aligned unaligned)
      (hash-cons istyle 'mods s)]
-    [(tt roman sf)
-     (hash-set istyle 'base s)]
+    [(tt) (hash-set istyle 'base 'modern)]
+    [(sf) (hash-set istyle 'base 'swiss)]
+    [(roman) (hash-set istyle 'base s)]
     [else
      (when #f (eprintf "add-simple-style: warning, ignoring: ~e" s))
      istyle]))
@@ -82,13 +89,37 @@
 
 ;; ------------------------------------------------------------
 
-;; A Paragraph is (paragraph Style Content)
-;; An Element is (element Style Content)
+;; A Flow is (Listof Block).
+;; A Block is one of
+;; - (itemization Style (Listof Flow))
+;; - (paragraph Style Content)
+;; - ... some other things ...
 
-(define (paragraph->pict p [istyle base-istyle])
-  (match p
+(define (flow->pict blocks [istyle base-istyle])
+  (apply vl-append (get-block-sep)
+         (for/list ([block (in-list blocks)])
+           (block->pict block istyle))))
+
+(define (block->pict block [istyle base-istyle])
+  (match block
     [(s:paragraph style content)
-     (content->pict content (add-style style istyle))]))
+     (content->pict content (add-style style istyle))]
+    [(s:compound-paragraph style blocks)
+     (apply vl-append (get-line-sep)
+            (for/list ([block (in-list blocks)])
+              (block->pict block istyle)))]
+    [(s:itemization style flows)
+     ;; FIXME
+     (apply vl-append (get-line-sep) ;; ??
+            (for/list ([flow (in-list flows)])
+              (htl-append 10 (get-bullet) (flow->pict flow istyle))))]))
+
+(define (get-bullet)
+  ;;(text "∘" '(bold) (get-base-size))
+  (arrowhead (* 2/3 (get-base-size)) 0))
+
+
+;; An Element is (element Style Content)
 
 (define (element->pict e [istyle base-istyle])
   (match e
@@ -121,7 +152,7 @@
     [(? string?)
      (for/list ([seg (in-list (string->segments (regexp-replace* "\n" content " ")))])
        (cons seg istyle))]
-    ;; [(? symbol?) (list (cons (content-symbol->string content) istyle))] ;; FIXME
+    [(? symbol?) (list (cons (content-symbol->string content) istyle))] ;; FIXME
     [(? pict?) (list content)]
     [(s:element style content)
      (content->fragments content (add-style style istyle))]
@@ -130,6 +161,14 @@
             (for/list ([part (in-list content)])
               (content->fragments part istyle)))]
     [_ (error 'content->fragments "bad content: ~e" content)]))
+
+(define (content-symbol->string sym)
+  (case sym
+    [(lsquo) "‘"] [(rsquo) "’"]
+    [(ldquo) "“"] [(rdquo) "”"]
+    [(mdash) "—"] [(ndash) "–"]
+    [(prime) "′"]
+    [else (error 'content-symbol->string "unknown symbol: ~e" sym)]))
 
 (define (whitespace-fragment? frag)
   (and (pair? frag) (regexp-match? #px"^\\s*$" (car frag))))
@@ -146,7 +185,8 @@
 (define (linebreak-fragments fragments width)
   (define (loop frags) ;; -> (Listof (Listof Pict))
     (cond [(null? frags) null]
-          [else (let-values ([(line rest-frags) (lineloop frags null 0)])
+          [else (let*-values ([(frags*) (dropf frags whitespace-fragment?)]
+                              [(line rest-frags) (lineloop frags* null 0)])
                   (cons line (loop rest-frags)))]))
   (define (lineloop frags racc accw) ;; -> (Listof Pict) (Listof Fragments)
     (define (return-line [frags frags] [racc racc])
@@ -179,3 +219,31 @@
           [else
            (cons (substring s (caar ws-zones) (cdar ws-zones))
                  (loop (cdar ws-zones) (cdr ws-zones)))])))
+
+;; ============================================================
+
+(require racket/pretty)
+(define (flow-pict #:style [style #f] . pre-flow)
+  (define flow (s:decode-flow pre-flow))
+  (pretty-print flow)
+  (flow->pict flow (add-style style base-istyle)))
+
+(module+ main
+  (require slideshow slideshow/code
+           (only-in scribble/base elem italic itemlist [tt s:tt] [item s:item]))
+  (slide
+   @flow-pict[#:style 'roman]{
+     This whole slide consists of a @italic{flow}. I consists of
+     multiple @s:tt{paragraphs} and @elem[#:style 'sf]{other such stuff}.
+
+     This is a @italic{paragraph}. It is written using Scribble's
+     at-exp reader, which means that when I use @code[para] and
+     @code[it] and picts, I do not have to break things manually, like
+     @code[(para "This" (it "is") "a para")]; I can write them more naturally.
+
+     This @code[λ] is good stuff:
+     @itemlist[
+     @s:item{it is @italic{functional}}
+     @s:item{it is @italic{higher-order}}
+     ]
+     }))
