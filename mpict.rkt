@@ -1,4 +1,4 @@
-#lang racket/base
+#lang at-exp racket/base
 (require "private/tv.rkt"
          racket/match
          pict
@@ -29,7 +29,7 @@
     (refocus (cc-superimpose p0 (scale (cellophane p RTime) (add1 (* 2 Time)))) p0)))
 
 (define/unlifted (fadein p)
-  (let ([p1 (values #;share (ghost (getZ #;values p)))])
+  (let ([p1 (ghost (getZ #;values p))])
     (refocus (cc-superimpose p1 (scale (cellophane p Time) (add1 (* 2 RTime)))) p1)))
 
 (define/unlifted (fadeswap p1 p2)
@@ -37,10 +37,14 @@
 
 (define/unlifted (hop p)
   (let ([p0 (values (ghost (getA p)))])
-    (pin-over/align p0 0 (* (pict-height p0) (hop-quad Time)) 'c 'c p)))
+    (pin-over/align p0 0 (* (pict-height p0) (hop-quad Time)) 'l 't p)))
 
 (define (hop-quad u)
   (* 4 u (sub1 u)))
+
+(define/unlifted (hop-in p [w 100])
+  (let ([p0 (launder (ghost (getA p)))])
+    (pin-over/align p0 (* RTime w) (* (pict-height p0) (hop-quad Time)) 'l 't p)))
 
 ;; ----
 
@@ -98,7 +102,8 @@
 
 (module+ main
 (slide (t "ready?"))
-#|
+
+#;
 (slide/mpict
  (vc-append 20
             (cellophane (t "hello world") Time)
@@ -113,19 +118,19 @@
                       0 (* 700 RTime)
                       (colorize (bt "rising!") "blue"))))
 
+#;
 (slide/mpict
  (vc-append 20
             (para "This is" (fadeout (colorize (bt "not bad.") "darkred")))
             (para "This is" (fadein (colorize (bt "pretty cool!") "blue")))))
-|#
 
 (slide/mpict
- (vc-append 20
-            (para "This is"
-                  (fadeswap (colorize (bt "not bad") "darkred")
-                            (colorize (bt "pretty cool") "blue"))
-                  ", isn't it?")))
+ (para "This is"
+       (fadeswap (colorize (bt "not bad") "darkred")
+                 (colorize (bt "pretty cool") "blue"))
+       ", isn't it?"))
 
+#;
 (slide/mpict
  (// (fadein (fadeout (t "whoa")))
      (fadein (t "whoa"))))
@@ -136,7 +141,7 @@
     (vl-append
      20
      (para (code (define id #,(tag-pict idfun 'idfun1))))
-     (para (tag-pict (if1 idfun (ghost idfun)) 'idfun2) "is the identity function"))
+     (para (tag-pict (ghost idfun) 'idfun2) "is the identity function"))
     (fly idfun 'idfun1 'idfun2))))
 
 (let ([var1 (code x)] [var2 (code y)] [rhs1 (code (+ 1 2))] [rhs2 (code (* 3 4))])
@@ -191,7 +196,25 @@
  (hc-append 20
             (timeclip 2 (hop (t "hello")) 'left)
             (timeclip 2 (hop (t "world")) 'right)
-            (timeclip 2 (cshadow (hop (t "whee!"))) 'stretch)
-            (>> 1 (hop (t "whoa!")))))
+            (timeclip 2 (hop (t "whee!")) 'stretch)
+            (>> 1 (hop (fadein (t "whoa!"))))))
 
+(require "scrib.rkt" (prefix-in s: scribble/base))
+(slide/mpict
+ (>>
+ @flow-pict[#:style 'roman]{
+   This whole slide consists of a @s:italic{flow}. It consists of
+   multiple @s:tt{paragraphs} and @s:elem[#:style 'sf]{other such stuff}.
+
+   This is a @s:italic{paragraph}. It is written using @s:italic{Scribble's
+   at-exp reader}, which means that when I use @code[para] and
+   @code[it] and picts, I do not have to break things manually, like
+   @hop-in[@fadein[@code[(para "This" (it "is") "a para")]]]; I can write them more naturally.
+
+   This @hop-in[@fadein[@code[λ]]] is good stuff:
+   @s:itemlist[
+   @s:item{it is @s:italic{functional}}
+   @s:item{it is @s:italic{higher-order}}
+   ]
+   }))
 )
