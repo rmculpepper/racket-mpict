@@ -101,6 +101,16 @@
 
 ;; ------------------------------------------------------------
 
+(define (remove-block-styles istyle)
+  (hash-remove istyle 'bgcolor))
+
+(define (apply-block-styles istyle p)
+  (cond [(hash-ref istyle 'bgcolor #f)
+         => (lambda (c) (bg-colorize p c))]
+        [else p]))
+
+;; ------------------------------------------------------------
+
 ;; A Flow is (Listof Block).
 ;; A Block is one of
 ;; - (itemization Style (Listof Flow))
@@ -112,7 +122,7 @@
          (for/list ([block (in-list blocks)])
            (block->pict block istyle))))
 
-(define (block->pict block [istyle base-istyle])
+(define (block->pict block istyle)
   (match block
     [(s:paragraph style content)
      (content->pict content (add-style style istyle))]
@@ -147,7 +157,11 @@
 ;; - convertible? to 'text or ???
 ;; - Element
 ;; - (Listof Content)
+
 (define (content->pict content istyle #:width [width (get-para-width)])
+  (apply-block-styles istyle (content->pict* content (remove-block-styles istyle) width)))
+
+(define (content->pict* content istyle width)
   (define fragments (content->fragments content istyle))
   (define lines (linebreak-fragments fragments width))
   (apply vl-append (get-line-sep)
@@ -162,6 +176,8 @@
 ;; either contains no whitespace or only whitespace.
 ;; FIXME: Start with laxer invariant: fragment never starts or ends
 ;; with whitespace; then only break if necessary.
+
+;; FIXME: pict fragment should save style too, for color (=> colorize!), bgcolor etc
 
 ;; content->fragments : Content IStyle -> (Listof Fragment)
 (define (content->fragments content istyle)
@@ -219,8 +235,8 @@
                   (cons line (loop rest-frags)))]))
   (define (lineloop frags racc accw) ;; -> (Listof Pict) (Listof Fragments)
     (define (return-line [frags frags] [racc racc])
-      (define line (reverse (dropf racc whitespace-fragment?)))
-      (values line frags))
+      ;; FIXME: drop picts from whitespace fragments from racc before reverse!
+      (values (reverse racc) frags))
     (match frags
       ['() (return-line)]
       [(cons frag1 frags2)
@@ -260,8 +276,9 @@
 (module+ main
   (require slideshow slideshow/code
            (only-in scribble/core color-property background-color-property)
-           (only-in scribble/base elem italic itemlist [tt s:tt] [item s:item])
+           (only-in scribble/base elem)
            (only-in scribble/manual litchar racketblock)
+           (prefix-in s: scribble/base)
            (for-label racket/base))
 
   (define (blue . content)
@@ -272,18 +289,20 @@
 
   (slide
    @flow-pict[#:style 'roman]{
-     This whole slide consists of a @italic{flow}. I consists of
+     This whole slide consists of a @s:italic{flow}. I consists of
      multiple @s:tt{paragraphs} and @elem[#:style 'sf]{other such stuff}.
 
-     This is a @italic{paragraph}. It is written using @blue{Scribble's
+     @s:para[#:style (s:style #f (list (background-color-property "yellow")))]{
+     This is a @s:italic{paragraph}. It is written using @blue{Scribble's
      @litchar["@"]-exp reader}, which means that when I use @code[para] and
      @code[it] and picts, @on-pink{I do not have to break things @elem[#:style 'larger]{manually}}, like
      @code[(para "This" (it "is") "a para")]; I can write them @on-pink{more naturally}.
+     }
 
      This @code[λ] is good stuff:
-     @itemlist[
-     @s:item{it is @italic{functional@elem[#:style 'superscript]{ish}}}
-     @s:item{it is @italic{higher-order}@elem[#:style 'subscript]{for sure}}
+     @s:itemlist[
+     @s:item{it is @s:italic{functional@elem[#:style 'superscript]{ish}}}
+     @s:item{it is @s:italic{higher-order}@elem[#:style 'subscript]{for sure}}
      ]
 
      @; -- Needs table!
