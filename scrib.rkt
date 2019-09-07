@@ -43,7 +43,6 @@
 ;;   where PTStyleSymbol is one of the following:
 ;;     'bold 'italic 'subscript 'superscript 'large-script 'caps
 ;;     'combine 'no-combine 'aligned 'unaligned)
-;; - (cons 'italic PTStyle)
 ;; - (cons Color PTStyle)
 
 ;; An IStyle is
@@ -78,6 +77,7 @@
     [(roman) (hash-set istyle 'base s)]
     [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
     [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
+    [("SCentered") (hash-set istyle 'block-halign 'center)]
     [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
     [("RktIn") (hash-set* istyle 'base 'modern 'color '(#xCC #x66 #x33))]
     [("RktPn") (hash-set* istyle 'base 'modern 'color '(#x84 #x3C #x24))]
@@ -88,6 +88,7 @@
     [("RktOut") (hash-set* istyle 'base 'modern 'color '(#x96 #x00 #x96))]
     [("RktCmt") (hash-set* istyle 'base 'modern 'color '(#xC2 #x74 #x1F))]
     [("RktVal") (hash-set* istyle 'base 'modern 'color '(#x22 #x8B #x22))]
+    [("RktBlk") (hash-set* istyle 'base 'modern 'keep-whitespace? #t)]
     [(hspace) (hash-set* istyle 'base 'modern 'keep-whitespace? #t)]
     [else
      (when #t (eprintf "add-simple-style: warning, ignoring: ~e\n" s))
@@ -112,21 +113,108 @@
 (define base-istyle '#hasheq((base . default) (scale . 1) (inset-to-width? . #t)))
 
 ;; ------------------------------------------------------------
+;; Block Styles
 
 ;; block style keys: 'bgcolor, 'inset-to-width?, 'width
 ;; ... but not all need to be removed
 
 (define (remove-block-styles istyle)
-  (let* ([h (hash-remove istyle 'bgcolor)])
-    h))
+  (hash-remove* istyle '(bgcolor block-halign)))
 
 (define (apply-block-styles istyle p)
   (let* ([p (cond [(hash-ref istyle 'bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
                   [else p])]
          [p (cond [(hash-ref istyle 'inset-to-width? #f)
-                   (inset p 0 0 (- (hash-ref istyle 'width) (pict-width p)) 0)]
+                   (define dwidth (- (hash-ref istyle 'width) (pict-width p)))
+                   (case (hash-ref istyle 'block-halign 'left)
+                     [(left)
+                      (inset p 0 0 dwidth 0)]
+                     [(right)
+                      (inset p dwidth 0 0 0)]
+                     [(center)
+                      (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)])]
                   [else p])])
+    p))
+
+;; ------------------------------------------------------------
+;; Table Styles
+
+;; FIXME: fold into add-style? just need to keep remove-table-styles separate
+(define (add-table-style style istyle)
+  (match style
+    [(s:style name props)
+     (foldl add-table-style-prop (add-table-style name istyle) props)]
+    ;; 'boxed, 'block -- see `table` docs
+    ['centered
+     (hash-set istyle 'block-halign 'center)]
+    [_ (add-style style istyle)]))
+
+(define (add-table-style-prop prop istyle)
+  (match prop
+    [(s:table-cells styless)
+     (hash-set istyle 'table-cells styless)]
+    [(s:table-columns styles)
+     (hash-set istyle 'table-cols styles)]
+    [_ (add-style-prop prop istyle)]))
+
+(define (remove-table-styles istyle)
+  (hash-remove* istyle '(table-cells table-cols)))
+
+(define (apply-table-styles istyle p)
+  (apply-block-styles istyle p))
+
+;; ------------------------------------------------------------
+;; Table Cell Styles
+
+(define (add-table-cell-style style istyle)
+  (match style
+    [(s:style name props)
+     (foldl add-table-cell-style-prop (add-table-cell-style name istyle) props)]
+    [_ istyle]))
+
+(define (add-table-cell-style-prop prop istyle)
+  (match prop
+    [(or 'left 'right 'center)
+     (hash-set istyle 'cell-halign prop)]
+    [(or 'top 'bottom 'vcenter)
+     (hash-set istyle 'cell-valign prop)]
+    ['border        (hash-cons istyle 'cell-border 'all)]
+    ['left-border   (hash-cons istyle 'cell-border 'left)]
+    ['right-border  (hash-cons istyle 'cell-border 'right)]
+    ['top-border    (hash-cons istyle 'cell-border 'top)]
+    ['bottom-border (hash-cons istyle 'cell-border 'bottom)]
+    [(s:background-color-property color)
+     (hash-set 'istyle 'cell-bgcolor (to-color color))]
+    [_ istyle]))
+
+(define (remove-table-cell-styles istyle)
+  (hash-remove* istyle '(cell-halign cell-valign cell-border cell-bgcolor)))
+
+(define (apply-table-cell-styles istyle width p)
+  (let* ([p (let ([dwidth (- width (pict-width p))])
+              (case (hash-ref istyle 'cell-halign 'left)
+                [(left) (inset p 0 0 dwidth 0)]
+                [(right) (inset p dwidth 0 0 0)]
+                [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]))]
+         [p (cond [(hash-ref istyle 'cell-bgcolor #f)
+                   => (lambda (c) (bg-colorize p c))]
+                  [else p])]
+         [p (let ([borders (hash-ref istyle 'cell-border '())])
+              (cond [(memq 'all borders) (frame p)]
+                    [(null? borders) p]
+                    [else (add-borders p
+                                       (memq 'left borders) (memq 'right borders)
+                                       (memq 'top borders) (memq 'bottom borders))]))])
+    (apply-block-styles istyle p)))
+
+(define (add-borders p left? right? top? bottom?)
+  (define pw (pict-width p))
+  (define ph (pict-height p))
+  (let* ([p (if left? (pin-over p 0 0 (vline 0 ph)) p)]
+         [p (if right? (pin-over p pw 0 (vline 0 ph)) p)]
+         [p (if top? (pin-over p 0 0 (hline pw 0)) p)]
+         [p (if bottom? (pin-over p 0 ph (hline pw 0)) p)])
     p))
 
 ;; ============================================================
@@ -145,7 +233,10 @@
 (define (block->pict block istyle)
   (match block
     [(s:paragraph style content)
-     (content->pict content (add-style style istyle))]
+     (let* ([istyle (add-style style istyle)]
+            [width (hash-ref istyle 'width)])
+       (define p (content->pict content (remove-block-styles istyle) width))
+       (apply-block-styles istyle p))]
     [(s:compound-paragraph style blocks)
      (apply vl-append (get-line-sep)
             (for/list ([block (in-list blocks)])
@@ -157,27 +248,7 @@
             (for/list ([flow (in-list flows)])
               (htl-append 10 (get-bullet) (flow->pict flow istyle))))]
     [(s:table style blockss)
-     ;; FIXME: handle inset-to-width?, other block styles
      (table->pict blockss (add-table-style style istyle))]))
-
-;; FIXME: fold into add-style? just need to keep remove-table-styles separate
-(define (add-table-style style istyle)
-  (match style
-    [(s:style name props)
-     (foldl add-table-style-prop (add-table-style name istyle) props)]
-    ;; 'boxed, 'centered, 'block -- see `table` docs
-    [_ istyle]))
-(define (add-table-style-prop prop istyle)
-  (match prop
-    [(s:table-cells styless)
-     (hash-set istyle 'table-cells styless)]
-    [(s:table-columns styles)
-     (hash-set istyle 'table-cols styles)]
-    [_
-     (when #t (eprintf "add-table-style-prop: ignoring ~e\n" prop))
-     istyle]))
-(define (remove-table-styles istyle)
-  (hash-remove* istyle '(table-cells table-cols)))
 
 (define (table->pict cellss istyle)
   (define nrows (length cellss))
@@ -196,19 +267,6 @@
         (cond [(eq? cell 'cont) #f]
               [else (render-table-cell cell cell-style col-style cell-istyle)]))))
   (define col-widths
-    #|
-    (let ([widthv (make-vector ncols #f)]
-          [cellm  (make-vector (* ncols nrows) #f)])
-      (define (get-index i j) (+ (* ncols i) j))
-      (define (mref i j) (vector-ref cellm (get-index i j)))
-      (define (mset! i j v) (vector-set! cellm (get-index i j) v))
-      ;; initialize matrix
-      (for ([rendered-cells (in-list rendered-cells)] [i (in-naturals)])
-        (for ([rendered-cell (in-list rendered-cell) ] [j (in-naturals)])
-          (mset! i j (if rendered-cell (pict-width (car rendered-cell)) #f))))
-      ;;
-      (for ([j (in-range ncols)])
-    |#
     (let ([columns (transpose rendered-cellss)])
       (for/fold ([rcolwidths null] [leftovers (make-list nrows 0)]
                  #:result (reverse rcolwidths))
@@ -234,84 +292,40 @@
       (cond [(not cell)
              (values acc (+ width extra-width))]
             [else
-             (define cell-pict (table-cell->pict (car cell) (cdr cell) (+ width extra-width)))
+             (define cell-pict
+               (apply-table-cell-styles (cdr cell) (+ width extra-width) (car cell)))
              (values (cons cell-pict acc) 0)])))
-  (apply vl-append 0 (map row->pict rendered-cellss)))
-
-(define (transpose xss)
-  (cond [(andmap pair? xss) (cons (map car xss) (transpose (map cdr xss)))]
-        [else null]))
-
-(define (add-table-cell-style style istyle)
-  (match style
-    [(s:style name props)
-     (foldl add-table-cell-style-prop (add-table-cell-style name istyle) props)]
-    [_ istyle]))
-(define (add-table-cell-style-prop prop istyle)
-  (match prop
-    [(or 'left 'right 'center)
-     (hash-set istyle 'cell-halign prop)]
-    [(or 'top 'bottom 'vcenter)
-     (hash-set istyle 'cell-valign prop)]
-    ['border ;; FIXME: left-border, etc
-     (hash-set 'istyle 'cell-border #t)]
-    [(s:background-color-property color)
-     (hash-set 'istyle 'cell-bgcolor (to-color color))]
-    [_ istyle]))
-(define (remove-table-cell-styles istyle)
-  (hash-remove* istyle '(cell-halign cell-valign cell-border cell-bgcolor)))
-
-(define (table-cell->pict p istyle width)
-  (define halign (hash-ref istyle 'cell-halign 'left))
-  (define bgcolor (hash-ref istyle 'cell-bgcolor #f))
-  (let* ([p (let ([dwidth (- width (pict-width p))])
-              (case (hash-ref istyle 'cell-halign 'left)
-                [(left) (inset p 0 0 dwidth 0)]
-                [(right) (inset p dwidth 0 0 0)]
-                [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]))]
-         [p (cond [(hash-ref istyle 'cell-bgcolor #f)
-                   => (lambda (c) (bg-colorize p c))]
-                  [else p])])
-    p))
+  (apply-table-styles istyle (apply vl-append 0 (map row->pict rendered-cellss))))
 
 ;; render-table-cell : Block Style Style IStyle -> (cons Pict IStyle)
 (define (render-table-cell block cell-style col-style istyle0)
   (define istyle (add-table-cell-style cell-style (add-table-cell-style col-style istyle0)))
   (cons (block->pict block (remove-table-cell-styles istyle)) istyle))
 
+(define (transpose xss)
+  (cond [(andmap pair? xss) (cons (map car xss) (transpose (map cdr xss)))]
+        [else null]))
+
 (define (get-bullet)
   ;;(text "∘" '(bold) (get-base-size))
   (arrowhead (* 2/3 (get-base-size)) 0))
 
-;; An Element is (element Style Content)
-
-(define (element->pict e istyle)
-  (match e
-    ;; ???
-    [(s:element style content)
-     (content->pict content (add-style style istyle))]))
+;; ------------------------------------------------------------
+;; Content
 
 ;; A Content is one of
 ;; - String
 ;; - Symbol in mdash ndash ldquo lsquo rdquo rsquo larr rarr prime
 ;; - convertible? to 'text or ???
-;; - Element
+;; - (element Style Content)
 ;; - (Listof Content)
 
-(define (content->pict content istyle)
-  (define istyle* (remove-block-styles istyle))
-  (apply-block-styles istyle (content->pict* content istyle* (hash-ref istyle 'width))))
-
-(define (content->pict* content istyle width)
+(define (content->pict content istyle width)
   (define fragments (content->fragments content istyle))
   (define lines (linebreak-fragments fragments width))
   (apply vl-append (get-line-sep)
-         (for/list ([line (in-list lines)]
-                    [index (in-naturals 1)])
-           (line->pict line width istyle (= index (length lines))))))
-
-(define (line->pict line width istyle last?)
-  (apply hbl-append 0 line))
+         (for/list ([line (in-list lines)])
+           (apply hbl-append 0 line))))
 
 ;; A Fragment is (cons (U Pict String) IStyle), where a string either
 ;; contains no whitespace or only whitespace.
@@ -324,7 +338,7 @@
     [(? string?)
      (for/list ([seg (in-list (string->segments (regexp-replace* "\n" content " ")))])
        (cons seg istyle))]
-    [(? symbol?) (list (cons (content-symbol->string content) istyle))] ;; FIXME
+    [(? symbol?) (list (cons (content-symbol->string content) istyle))]
     [(? pict?) (list (cons content istyle))]
     [(s:element style content)
      (content->fragments content (add-style style istyle))]
@@ -387,10 +401,6 @@
        (define w1 (pict-width p1))
        (cond [(<= (+ accw w1) width)
               (lineloop frags2 (cons p1 racc) (+ accw w1))]
-             #|
-             [(break-fragment frag1)
-              => (lambda (frags1) (lineloop (append frags1 frags2) racc raccw))]
-             |#
              [(zero? accw) ;; overflows, but already on its own line
               (return-line frags2 (cons p1 racc))]
              [else (return-line)])]))
@@ -410,10 +420,8 @@
 
 ;; ============================================================
 
-(require racket/pretty)
 (define (flow-pict #:style [style #f] . pre-flow)
   (define flow (s:decode-flow pre-flow))
-  (pretty-print flow)
   (flow->pict flow (add-style style (hash-set base-istyle 'width (get-para-width)))))
 
 (module+ main
@@ -439,7 +447,7 @@
      This is a @s:italic{paragraph}. It is written using @blue{Scribble's
      @litchar["@"]-exp reader}, which means that when I use @code[para] and
      @code[it] and picts, @on-pink{I do not have to break things @elem[#:style 'larger]{manually}},
-     like @code[(para "This" (it "is") "a para")]; I can write them @on-pink{more naturally}.
+     like @code[(para "This" (it "is") "a para")]---I can write them @on-pink{``more naturally''}.
      }
 
      This @code[λ] is good stuff:
@@ -450,6 +458,15 @@
      })
 
   (slide
+   @flow-pict[#:style 'roman]{
+     This is some centered text within a paragraph:
+     @s:centered{carpe diem}
+     and this is what comes after.
+
+     And this is a whole new paragraph.
+   })
+
+  (slide
    @frame[
    @flow-pict[#:style 'roman]{
      @; -- Needs table!
@@ -457,7 +474,7 @@
      (define (map f xs)
        (if (pair? xs)
            (cons (f (car xs)) (map f (cdr xs)))
-           null))
+           '()))
      ]
      }]
    @frame[
@@ -471,7 +488,7 @@
   (slide
    @flow-pict[#:style 'roman]{
 
-     @tabular[#:sep @hspace[1]
+     @tabular[#:sep @hspace[1] #:style 'centered
               (list (list "soup" "gazpacho")
                     (list "soup" "tonjiru"))]
 
