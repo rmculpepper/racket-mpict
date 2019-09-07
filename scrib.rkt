@@ -77,6 +77,7 @@
     [(roman) (hash-set istyle 'base s)]
     [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
     [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
+    [(boxed) (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
     [("SCentered") (hash-set istyle 'block-halign 'center)]
     [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
     [("RktIn") (hash-set* istyle 'base 'modern 'color '(#xCC #x66 #x33))]
@@ -119,13 +120,10 @@
 ;; ... but not all need to be removed
 
 (define (remove-block-styles istyle)
-  (hash-remove* istyle '(bgcolor block-halign)))
+  (hash-remove* istyle '(bgcolor block-halign block-border)))
 
 (define (apply-block-styles istyle p)
-  (let* ([p (cond [(hash-ref istyle 'bgcolor #f)
-                   => (lambda (c) (bg-colorize p c))]
-                  [else p])]
-         [p (cond [(hash-ref istyle 'inset-to-width? #f)
+  (let* ([p (cond [(hash-ref istyle 'inset-to-width? #f)
                    (define dwidth (- (hash-ref istyle 'width) (pict-width p)))
                    (case (hash-ref istyle 'block-halign 'left)
                      [(left)
@@ -134,6 +132,12 @@
                       (inset p dwidth 0 0 0)]
                      [(center)
                       (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)])]
+                  [else p])]
+         [p (cond [(hash-ref istyle 'bgcolor #f)
+                   => (lambda (c) (bg-colorize p c))]
+                  [else p])]
+         [p (cond [(hash-ref istyle 'block-border #f)
+                   => (lambda (borders) (add-borders p borders))]
                   [else p])])
     p))
 
@@ -159,7 +163,7 @@
     [_ (add-style-prop prop istyle)]))
 
 (define (remove-table-styles istyle)
-  (hash-remove* istyle '(table-cells table-cols)))
+  (remove-block-styles (hash-remove* istyle '(table-cells table-cols))))
 
 (define (apply-table-styles istyle p)
   (apply-block-styles istyle p))
@@ -200,21 +204,19 @@
          [p (cond [(hash-ref istyle 'cell-bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
                   [else p])]
-         [p (let ([borders (hash-ref istyle 'cell-border '())])
-              (cond [(memq 'all borders) (frame p)]
-                    [(null? borders) p]
-                    [else (add-borders p
-                                       (memq 'left borders) (memq 'right borders)
-                                       (memq 'top borders) (memq 'bottom borders))]))])
+         [p (cond [(hash-ref istyle 'cell-border #f)
+                   => (lambda (borders) (add-borders p borders))]
+                  [else p])])
     (apply-block-styles istyle p)))
 
-(define (add-borders p left? right? top? bottom?)
+(define (add-borders p borders)
+  (define (has? sym) (or (memq sym borders) (memq 'all borders)))
   (define pw (pict-width p))
   (define ph (pict-height p))
-  (let* ([p (if left? (pin-over p 0 0 (vline 0 ph)) p)]
-         [p (if right? (pin-over p pw 0 (vline 0 ph)) p)]
-         [p (if top? (pin-over p 0 0 (hline pw 0)) p)]
-         [p (if bottom? (pin-over p 0 ph (hline pw 0)) p)])
+  (let* ([p (if (has? 'left) (pin-over p 0 0 (vline 0 ph)) p)]
+         [p (if (has? 'right) (pin-over p pw 0 (vline 0 ph)) p)]
+         [p (if (has? 'top) (pin-over p 0 0 (hline pw 0)) p)]
+         [p (if (has? 'bottom) (pin-over p 0 ph (hline pw 0)) p)])
     p))
 
 ;; ============================================================
@@ -344,6 +346,8 @@
      (content->fragments content (add-style style istyle))]
     [(s:delayed-element _ _ plain)
      (content->fragments (plain) istyle)]
+    [(s:part-relative-element _ _ plain)
+     (content->fragments (plain) istyle)]
     [(? list?)
      (apply append
             (for/list ([part (in-list content)])
@@ -357,6 +361,7 @@
     [(mdash) "—"] [(ndash) "–"]
     [(prime) "′"]
     [(nbsp) " "] ;; non-breaking space
+    [(rarr) "→"]
     [else (error 'content-symbol->string "unknown symbol: ~e" sym)]))
 
 (define (whitespace-fragment? frag)
@@ -428,7 +433,7 @@
   (require slideshow slideshow/code
            (only-in scribble/core color-property background-color-property)
            (only-in scribble/base elem tabular hspace)
-           (only-in scribble/manual litchar racketblock racketgrammar*)
+           (only-in scribble/manual litchar racketblock racketgrammar* defproc racket)
            (prefix-in s: scribble/base)
            (for-label racket/base))
 
@@ -464,6 +469,9 @@
      and this is what comes after.
 
      And this is a whole new paragraph.
+     @defproc[(foo [bar baz?]) quux/c]{
+     Returns the best @s:italic{quux} appropriate for @racket[bar].
+     }
    })
 
   (slide
