@@ -53,16 +53,17 @@
 ;;         ['keep-whitespace? Boolean]
 ;;         ... other effects ...)
 
+(define base-istyle '#hasheq((base . default) (scale . 1) (inset-to-width? . #t)))
+
+;; ------------------------------------------------------------
+;; Basic Styles
+
 (define (add-style s istyle)
   (match s
     [(s:style name props)
-     (for/fold ([istyle (add-style name istyle)])
-               ([prop (in-list props)])
-       (add-style-prop prop istyle))]
-    [(? string?)
-     (add-simple-style s istyle)]
-    [(? symbol?)
-     (add-simple-style s istyle)]
+     (foldl add-style-prop (add-style name istyle) props)]
+    [(? string?) (add-simple-style s istyle)]
+    [(? symbol?) (add-simple-style s istyle)]
     [#f istyle]
     [_
      (when #t (eprintf "add-style: warning, ignoring: ~e\n" s))
@@ -105,19 +106,23 @@
     [(? s:tex-addition?) istyle]
     [(== 'tt-chars) istyle]
     [(or 'omitable 'never-indents) istyle]
+    ['decorative istyle] ;; FIXME?
     [_
      (when #t (eprintf "add-style-prop: warning, ignoring: ~e\n" prop))
      istyle]))
 
 (define (to-color color) color) ;; FIXME
 
-(define base-istyle '#hasheq((base . default) (scale . 1) (inset-to-width? . #t)))
-
 ;; ------------------------------------------------------------
 ;; Block Styles
 
 ;; block style keys: 'bgcolor, 'inset-to-width?, 'width
 ;; ... but not all need to be removed
+
+(define (add-block-style style istyle)
+  (add-style style istyle))
+(define (add-block-style-prop prop istyle)
+  (add-style-prop prop istyle))
 
 (define (remove-block-styles istyle)
   (hash-remove* istyle '(bgcolor block-halign block-border)))
@@ -126,12 +131,9 @@
   (let* ([p (cond [(hash-ref istyle 'inset-to-width? #f)
                    (define dwidth (- (hash-ref istyle 'width) (pict-width p)))
                    (case (hash-ref istyle 'block-halign 'left)
-                     [(left)
-                      (inset p 0 0 dwidth 0)]
-                     [(right)
-                      (inset p dwidth 0 0 0)]
-                     [(center)
-                      (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)])]
+                     [(left) (inset p 0 0 dwidth 0)]
+                     [(right) (inset p dwidth 0 0 0)]
+                     [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)])]
                   [else p])]
          [p (cond [(hash-ref istyle 'bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
@@ -144,15 +146,13 @@
 ;; ------------------------------------------------------------
 ;; Table Styles
 
-;; FIXME: fold into add-style? just need to keep remove-table-styles separate
 (define (add-table-style style istyle)
   (match style
     [(s:style name props)
      (foldl add-table-style-prop (add-table-style name istyle) props)]
-    ;; 'boxed, 'block -- see `table` docs
     ['centered
      (hash-set istyle 'block-halign 'center)]
-    [_ (add-style style istyle)]))
+    [_ (add-block-style style istyle)]))
 
 (define (add-table-style-prop prop istyle)
   (match prop
@@ -160,7 +160,7 @@
      (hash-set istyle 'table-cells styless)]
     [(s:table-columns styles)
      (hash-set istyle 'table-cols styles)]
-    [_ (add-style-prop prop istyle)]))
+    [_ (add-block-style-prop prop istyle)]))
 
 (define (remove-table-styles istyle)
   (remove-block-styles (hash-remove* istyle '(table-cells table-cols))))
@@ -175,13 +175,13 @@
   (match style
     [(s:style name props)
      (foldl add-table-cell-style-prop (add-table-cell-style name istyle) props)]
-    [_ istyle]))
+    [_ (add-block-style style istyle)]))
 
 (define (add-table-cell-style-prop prop istyle)
   (match prop
     [(or 'left 'right 'center)
      (hash-set istyle 'cell-halign prop)]
-    [(or 'top 'bottom 'vcenter)
+    [(or 'top 'bottom 'vcenter 'baseline)
      (hash-set istyle 'cell-valign prop)]
     ['border        (hash-cons istyle 'cell-border 'all)]
     ['left-border   (hash-cons istyle 'cell-border 'left)]
@@ -190,7 +190,7 @@
     ['bottom-border (hash-cons istyle 'cell-border 'bottom)]
     [(s:background-color-property color)
      (hash-set 'istyle 'cell-bgcolor (to-color color))]
-    [_ istyle]))
+    [_ (add-block-style-prop prop istyle)]))
 
 (define (remove-table-cell-styles istyle)
   (hash-remove* istyle '(cell-halign cell-valign cell-border cell-bgcolor)))
@@ -208,16 +208,6 @@
                    => (lambda (borders) (add-borders p borders))]
                   [else p])])
     (apply-block-styles istyle p)))
-
-(define (add-borders p borders)
-  (define (has? sym) (or (memq sym borders) (memq 'all borders)))
-  (define pw (pict-width p))
-  (define ph (pict-height p))
-  (let* ([p (if (has? 'left) (pin-over p 0 0 (vline 0 ph)) p)]
-         [p (if (has? 'right) (pin-over p pw 0 (vline 0 ph)) p)]
-         [p (if (has? 'top) (pin-over p 0 0 (hline pw 0)) p)]
-         [p (if (has? 'bottom) (pin-over p 0 ph (hline pw 0)) p)])
-    p))
 
 ;; ============================================================
 
@@ -385,9 +375,6 @@
      (define size (* (hash-ref istyle 'scale) (get-base-size)))
      (finish (text str ptstyle size) istyle)]))
 
-(define (bg-colorize p c)
-  (pin-under p 0 0 (filled-rectangle (pict-width p) (pict-height p) #:draw-border? #f #:color c)))
-
 ;; linebreak-fragments : (Listof fragments) PositiveReal -> (Listof (Listof Pict))
 (define (linebreak-fragments fragments width)
   (define (loop frags) ;; -> (Listof (Listof Pict))
@@ -422,6 +409,19 @@
           [else
            (cons (substring s (caar ws-zones) (cdar ws-zones))
                  (loop (cdar ws-zones) (cdr ws-zones)))])))
+
+(define (bg-colorize p c)
+  (pin-under p 0 0 (filled-rectangle (pict-width p) (pict-height p) #:draw-border? #f #:color c)))
+
+(define (add-borders p borders)
+  (define (has? sym) (or (memq sym borders) (memq 'all borders)))
+  (define pw (pict-width p))
+  (define ph (pict-height p))
+  (let* ([p (if (has? 'left) (pin-over p 0 0 (vline 0 ph)) p)]
+         [p (if (has? 'right) (pin-over p pw 0 (vline 0 ph)) p)]
+         [p (if (has? 'top) (pin-over p 0 0 (hline pw 0)) p)]
+         [p (if (has? 'bottom) (pin-over p 0 ph (hline pw 0)) p)])
+    p))
 
 ;; ============================================================
 
