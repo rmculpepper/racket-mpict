@@ -20,6 +20,9 @@
 ;; (current-title-color) = "black"
 ;; (current-code-font) = (bold . modern)
 
+(define (get-code-inset) 0) ;; (/ (get-block-sep) 2)
+(define (get-vertical-inset) (get-block-sep))
+
 ;; ------------------------------------------------------------
 ;; Styles
 
@@ -79,6 +82,9 @@
     [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
     [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
     [(boxed) (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
+    [(vertical-inset) (hash-set* istyle 'block-inset 'vertical)]
+    [(code-inset) (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
+    ;; "RBackgroundLabel"
     [("SCentered") (hash-set istyle 'block-halign 'center)]
     [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
     [("RktIn") (hash-set* istyle 'base 'modern 'color '(#xCC #x66 #x33))]
@@ -91,6 +97,7 @@
     [("RktCmt") (hash-set* istyle 'base 'modern 'color '(#xC2 #x74 #x1F))]
     [("RktVal") (hash-set* istyle 'base 'modern 'color '(#x22 #x8B #x22))]
     [("RktBlk") (hash-set* istyle 'base 'modern 'keep-whitespace? #t)]
+    [("RktSymDef") (hash-set* istyle 'base 'modern 'color "black" 'mods '(bold))]
     [(hspace) (hash-set* istyle 'base 'modern 'keep-whitespace? #t)]
     [else
      (when #t (eprintf "add-simple-style: warning, ignoring: ~e\n" s))
@@ -125,7 +132,7 @@
   (add-style-prop prop istyle))
 
 (define (remove-block-styles istyle)
-  (hash-remove* istyle '(bgcolor block-halign block-border)))
+  (hash-remove* istyle '(bgcolor block-halign block-border block-inset)))
 
 (define (apply-block-styles istyle p)
   (let* ([p (cond [(hash-ref istyle 'inset-to-width? #f)
@@ -140,7 +147,11 @@
                   [else p])]
          [p (cond [(hash-ref istyle 'block-border #f)
                    => (lambda (borders) (add-borders p borders))]
-                  [else p])])
+                  [else p])]
+         [p (case (hash-ref istyle 'block-inset #f)
+              [(code) (inset p (get-code-inset) 0)]
+              [(vertical) (inset p 0 (get-vertical-inset))]
+              [else p])])
     p))
 
 ;; ------------------------------------------------------------
