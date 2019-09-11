@@ -21,7 +21,7 @@
 ;; (current-code-font) = (bold . modern)
 
 (define (get-code-inset) 0) ;; (/ (get-block-sep) 2)
-(define (get-vertical-inset) (get-block-sep))
+(define (get-vertical-inset) (get-line-sep))
 
 ;; ------------------------------------------------------------
 ;; Styles
@@ -147,7 +147,9 @@
     ['boxed (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
     ['vertical-inset (hash-set* istyle 'block-inset 'vertical)]
     ['code-inset (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
-    ;; "RBackgroundLabel"
+    ["RBackgroundLabel" ;; FIXME: eliminate vspace
+     (hash-set* istyle 'block-halign 'float-right 'inset-to-width? #t 'block-width (get-para-width)
+                'text-base 'modern 'color "darkgray")]
     ["SCentered" (hash-set istyle 'block-halign 'center)]
     ;; ----
     [#f istyle]
@@ -168,7 +170,8 @@
                    (case (hash-ref istyle 'block-halign 'left)
                      [(left) (inset p 0 0 dwidth 0)]
                      [(right) (inset p dwidth 0 0 0)]
-                     [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)])]
+                     [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]
+                     [(float-right) (pin-over (blank) 0 0 (inset p dwidth 0 0 0))])]
                   [else p])]
          [p (cond [(hash-ref istyle 'bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
@@ -270,20 +273,22 @@
 (define (block->pict block istyle)
   (match block
     [(s:paragraph style content)
-     (let* ([istyle (add-style style istyle)]
+     (let* ([istyle (add-block-style style istyle)]
             [width (hash-ref istyle 'block-width)])
        (define p (content->pict content (remove-block-styles istyle) width))
        (apply-block-styles istyle p))]
     [(s:compound-paragraph style blocks)
-     (apply vl-append (get-line-sep)
-            (for/list ([block (in-list blocks)])
-              (block->pict block istyle)))]
+     (let ([istyle (add-block-style style istyle)])
+       (apply vl-append (get-line-sep)
+              (for/list ([block (in-list blocks)])
+                (block->pict block istyle))))]
     [(s:nested-flow style flow)
-     (flow->pict flow (add-style style istyle))]
+     (flow->pict flow (add-block-style style istyle))]
     [(s:itemization style flows)
-     (apply vl-append (get-line-sep) ;; ??
-            (for/list ([flow (in-list flows)])
-              (htl-append 10 (get-bullet) (flow->pict flow istyle))))]
+     (let ([istyle (add-block-style style istyle)])
+       (apply vl-append (get-line-sep) ;; ??
+              (for/list ([flow (in-list flows)])
+                (htl-append 10 (get-bullet) (flow->pict flow istyle)))))]
     [(s:table style blockss)
      (table->pict blockss (add-table-style style istyle))]))
 
@@ -470,6 +475,39 @@
 
 ;; ============================================================
 
+(require racket/pretty)
+(pretty-print-columns 150)
+
 (define (flow-pict #:style [style #f] . pre-flow)
   (define flow (s:decode-flow pre-flow))
+  (pretty-print (simplify flow))
   (flow->pict flow (add-style style (hash-set base-istyle 'block-width (get-para-width)))))
+
+(define (simplify x)
+  (match x
+    [(s:paragraph style content)
+     (s:paragraph (simplify-style style) (simplify content))]
+    [(s:compound-paragraph style blocks)
+     (s:compound-paragraph (simplify-style style) (simplify blocks))]
+    [(s:nested-flow style flow)
+     (s:nested-flow (simplify-style style) (simplify flow))]
+    [(s:itemization style flows)
+     (s:itemization (simplify-style style) (simplify flows))]
+    [(s:table style blockss)
+     (s:table (simplify-style style) (simplify blockss))]
+    [(s:element style content)
+     (s:element (simplify-style style) (simplify content))]
+    [(s:delayed-element _ _ plain)
+     (s:element 'spliced (simplify (plain)))]
+    [(s:part-relative-element _ _ plain)
+     (s:element 'spliced (simplify (plain)))]
+    [(? list? xs) (map simplify xs)]
+    [x x]))
+
+(define (simplify-style s)
+  (define (keep-prop? x)
+    (not (or (s:css-addition? x) (s:tex-addition? x))))
+  (match s
+    [(s:style s props)
+     (s:style s (filter keep-prop? props))]
+    [s s]))

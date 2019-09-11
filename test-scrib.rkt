@@ -40,6 +40,7 @@
    and this is what comes after.
 
    And this is a whole new paragraph.
+
    @s:defproc[(foo [bar baz?]) quux/c]{
    Returns the best @s:italic{quux} appropriate for @s:racket[bar].
    }
