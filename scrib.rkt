@@ -72,8 +72,8 @@
 ;; Basic Styles
 
 ;; Elem styles:
-;; - 'mods : (Listof PStyleSymbol)
-;; - 'base : (U 'default font% (U 'roman ...) String) -- font face
+;; - 'text-base : (U 'default font% (U 'roman ...) String) -- font face
+;; - 'text-mods : (Listof PStyleSymbol)
 ;; - 'color : (U String color%)
 ;; - 'bgcolor : (U String color%)
 ;; - 'keep-whitespace? : Boolean
@@ -82,20 +82,15 @@
   (match s
     [(s:style name props)
      (foldl add-style-prop (add-style name istyle) props)]
-    [(? string?) (add-simple-style s istyle)]
-    [(? symbol?) (add-simple-style s istyle)]
-    [#f istyle]
-    [_
-     (when #t (eprintf "add-style: warning, ignoring: ~e\n" s))
-     istyle]))
+    [s (add-simple-style s istyle)]))
 
 (define (add-simple-style s istyle)
   (case s
     [(italic bold subscript superscript #||# combine no-combine aligned unaligned)
-     (hash-cons istyle 'mods s)]
-    [(tt) (hash-set istyle 'base 'modern)]
-    [(sf) (hash-set istyle 'base 'swiss)]
-    [(roman) (hash-set istyle 'base s)]
+     (hash-cons istyle 'text-mods s)]
+    [(tt) (hash-set istyle 'text-base 'modern)]
+    [(sf) (hash-set istyle 'text-base 'swiss)]
+    [(roman) (hash-set istyle 'text-base s)]
     [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
     [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
     [(boxed) (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
@@ -104,21 +99,20 @@
     ;; "RBackgroundLabel"
     [("SCentered") (hash-set istyle 'block-halign 'center)]
     [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
-    [("RktIn") (hash-set* istyle 'base 'modern 'color '(#xCC #x66 #x33))]
-    [("RktPn") (hash-set* istyle 'base 'modern 'color '(#x84 #x3C #x24))]
-    [("RktSym") (hash-set* istyle 'base 'modern 'color '(#x00 #x00 #x80))] ;; ???
-    [("RktVar") (hash-set* (hash-cons istyle 'mods 'italic)
-                           'base 'modern 'color '(#x40 #x40 #x40))]
-    [("RktRes") (hash-set* istyle 'base 'modern 'color '(#x00 #x00 #xAF))]
-    [("RktOut") (hash-set* istyle 'base 'modern 'color '(#x96 #x00 #x96))]
-    [("RktCmt") (hash-set* istyle 'base 'modern 'color '(#xC2 #x74 #x1F))]
-    [("RktVal") (hash-set* istyle 'base 'modern 'color '(#x22 #x8B #x22))]
-    [("RktBlk") (hash-set* istyle 'base 'modern 'keep-whitespace? #t)]
-    [("RktSymDef") (hash-set* istyle 'base 'modern 'color "black" 'mods '(bold))]
-    [(hspace) (hash-set* istyle 'base 'modern 'keep-whitespace? #t)]
-    [else
-     (when #t (eprintf "add-simple-style: warning, ignoring: ~e\n" s))
-     istyle]))
+    [("RktIn") (hash-set* istyle 'text-base 'modern 'color '(#xCC #x66 #x33))]
+    [("RktPn") (hash-set* istyle 'text-base 'modern 'color '(#x84 #x3C #x24))]
+    [("RktSym") (hash-set* istyle 'text-base 'modern 'color '(#x00 #x00 #x80))] ;; ???
+    [("RktVar") (hash-set* (hash-cons istyle 'text-mods 'italic)
+                           'text-base 'modern 'color '(#x40 #x40 #x40))]
+    [("RktRes") (hash-set* istyle 'text-base 'modern 'color '(#x00 #x00 #xAF))]
+    [("RktOut") (hash-set* istyle 'text-base 'modern 'color '(#x96 #x00 #x96))]
+    [("RktCmt") (hash-set* istyle 'text-base 'modern 'color '(#xC2 #x74 #x1F))]
+    [("RktVal") (hash-set* istyle 'text-base 'modern 'color '(#x22 #x8B #x22))]
+    [("RktBlk") (hash-set* istyle 'text-base 'modern 'keep-whitespace? #t)]
+    [("RktSymDef") (hash-set* istyle 'text-base 'modern 'color "black" 'text-mods '(bold))]
+    [(hspace) (hash-set* istyle 'text-base 'modern 'keep-whitespace? #t)]
+    [(#f) istyle]
+    [else (begin (when #t (eprintf "add-style: warning, ignoring: ~e\n" s)) istyle)]))
 
 (define (add-style-prop prop istyle)
   (match prop
@@ -128,12 +122,9 @@
      (hash-set istyle 'bgcolor (to-color color))]
     [(? s:css-addition?) istyle]
     [(? s:tex-addition?) istyle]
-    [(== 'tt-chars) istyle]
-    [(or 'omitable 'never-indents) istyle]
-    ['decorative istyle] ;; FIXME?
-    [_
-     (when #t (eprintf "add-style-prop: warning, ignoring: ~e\n" prop))
-     istyle]))
+    ['tt-chars istyle]
+    [(or 'omitable 'never-indents 'decorative) istyle] ;; FIXME?
+    [_ (begin (when #t (eprintf "add-style-prop: warning, ignoring: ~e\n" prop)) istyle)]))
 
 (define (to-color color) color) ;; FIXME
 
@@ -141,24 +132,39 @@
 ;; Block Styles
 
 ;; Block style keys:
-;; - 'inset-to-width? : Boolean
-;; - 'width : PositiveReal
 ;; - 'bgcolor : (U color% String)
+;; - 'inset-to-width? : Boolean
+;; - 'block-width : PositiveReal
 ;; - 'block-halign : (U 'left 'right 'center)
 ;; - 'block-border : (Listof (U 'all 'left 'right 'top 'bottom))
 ;; - 'block-inset : (U 'code 'vertical)
 
-(define (add-block-style style istyle)
-  (add-style style istyle))
+(define (add-block-style s istyle)
+  (match s
+    [(s:style name props)
+     (foldl add-block-style-prop (add-block-style name istyle) props)]
+    ;; ----
+    ['boxed (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
+    ['vertical-inset (hash-set* istyle 'block-inset 'vertical)]
+    ['code-inset (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
+    ;; "RBackgroundLabel"
+    ["SCentered" (hash-set istyle 'block-halign 'center)]
+    ;; ----
+    [#f istyle]
+    [_ (begin (when #t (eprintf "add-style: warning, ignoring: ~e\n" s)) istyle)]))
+
 (define (add-block-style-prop prop istyle)
-  (add-style-prop prop istyle))
+  (match prop
+    [(or 'omitable 'never-indents) istyle]
+    ['decorative istyle] ;; FIXME?
+    [prop (add-style-prop prop istyle)]))
 
 (define (remove-block-styles istyle)
   (hash-remove* istyle '(bgcolor block-halign block-border block-inset)))
 
 (define (apply-block-styles istyle p)
   (let* ([p (cond [(hash-ref istyle 'inset-to-width? #f)
-                   (define dwidth (- (hash-ref istyle 'width) (pict-width p)))
+                   (define dwidth (- (hash-ref istyle 'block-width) (pict-width p)))
                    (case (hash-ref istyle 'block-halign 'left)
                      [(left) (inset p 0 0 dwidth 0)]
                      [(right) (inset p dwidth 0 0 0)]
@@ -265,7 +271,7 @@
   (match block
     [(s:paragraph style content)
      (let* ([istyle (add-style style istyle)]
-            [width (hash-ref istyle 'width)])
+            [width (hash-ref istyle 'block-width)])
        (define p (content->pict content (remove-block-styles istyle) width))
        (apply-block-styles istyle p))]
     [(s:compound-paragraph style blocks)
@@ -288,7 +294,7 @@
   (define cell-styless (or (hash-ref istyle 'table-cells #f)
                            (make-list nrows (make-list ncols #f))))
   (define cell-istyle
-    (hash-set* (remove-table-styles istyle) 'inset-to-width? #f 'width +inf.0))
+    (hash-set* (remove-table-styles istyle) 'inset-to-width? #f 'block-width +inf.0))
   (define rendered-cellss ;; (Listof (Listof (U (cons Pict IStyle) #f)))
     (for/list ([cells (in-list cellss)]
                [cell-styles (in-list cell-styless)])
@@ -410,7 +416,7 @@
   (match fragment
     [(cons (? pict? p) istyle) (finish p istyle)]
     [(cons (? string? str) istyle)
-     (define ptstyle (append (hash-ref istyle 'mods null) (hash-ref istyle 'base)))
+     (define ptstyle (append (hash-ref istyle 'text-mods null) (hash-ref istyle 'text-base)))
      (define size (* (hash-ref istyle 'scale) (get-base-size)))
      (finish (text str ptstyle size) istyle)]))
 
@@ -466,4 +472,4 @@
 
 (define (flow-pict #:style [style #f] . pre-flow)
   (define flow (s:decode-flow pre-flow))
-  (flow->pict flow (add-style style (hash-set base-istyle 'width (get-para-width)))))
+  (flow->pict flow (add-style style (hash-set base-istyle 'block-width (get-para-width)))))
