@@ -48,18 +48,35 @@
 ;;     'combine 'no-combine 'aligned 'unaligned)
 ;; - (cons Color PTStyle)
 
-;; An IStyle is
-;; (hasheq 'base (U 'default font% (U 'roman ...) String)
-;;         'mods (Listof PTStyleSymbol)
-;;         ['color Color] ['bgcolor Color]
-;;         ['width PosReal] ['inset-to-width? Boolean]
-;;         ['keep-whitespace? Boolean]
-;;         ... other effects ...)
+;; ------------------------------------------------------------
+;; IStyle
 
-(define base-istyle '#hasheq((base . default) (scale . 1) (inset-to-width? . #t)))
+;; An IStyle is an immutable hash mapping style keys (symbols) to values.
+;; - There are multiple levels of keys corresponding to different
+;;   levels of document structure (eg block vs elem).
+;; - Some keys (eg, 'bgcolor) are handled at multiple levels, but most
+;;   are specific to one level.
+;; - Level-specific keys are generally removed for processing of inner
+;;   levels (see `remove-X-styles`); then the result of processing the
+;;   inner levels has the outer level's style keys applied (see
+;;   `apply-X-styles`).
+
+(define base-istyle
+  '#hasheq(;; Block Styles
+           (inset-to-width? . #t)
+           ;; Elem Styles
+           (base . default)
+           (scale . 1)))
 
 ;; ------------------------------------------------------------
 ;; Basic Styles
+
+;; Elem styles:
+;; - 'mods : (Listof PStyleSymbol)
+;; - 'base : (U 'default font% (U 'roman ...) String) -- font face
+;; - 'color : (U String color%)
+;; - 'bgcolor : (U String color%)
+;; - 'keep-whitespace? : Boolean
 
 (define (add-style s istyle)
   (match s
@@ -123,8 +140,13 @@
 ;; ------------------------------------------------------------
 ;; Block Styles
 
-;; block style keys: 'bgcolor, 'inset-to-width?, 'width
-;; ... but not all need to be removed
+;; Block style keys:
+;; - 'inset-to-width? : Boolean
+;; - 'width : PositiveReal
+;; - 'bgcolor : (U color% String)
+;; - 'block-halign : (U 'left 'right 'center)
+;; - 'block-border : (Listof (U 'all 'left 'right 'top 'bottom))
+;; - 'block-inset : (U 'code 'vertical)
 
 (define (add-block-style style istyle)
   (add-style style istyle))
@@ -181,6 +203,12 @@
 
 ;; ------------------------------------------------------------
 ;; Table Cell Styles
+
+;; Table cell style keys:
+;; - 'cell-border : (Listof (U 'all 'left 'right 'top 'bottom))
+;; - 'cell-halign : (U 'left 'right 'center)
+;; - 'cell-valign : (U 'top 'bottom 'vcenter 'baseline) -- currently ignored
+;; - 'cell-bgcolor : (U color% String)
 
 (define (add-table-cell-style style istyle)
   (match style
