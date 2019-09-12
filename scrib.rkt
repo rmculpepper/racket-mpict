@@ -272,10 +272,13 @@
     [(s:nested-flow style flow)
      (flow->pict flow (add-block-style style istyle))]
     [(s:itemization style flows)
-     (let ([istyle (add-block-style style istyle)])
+     (define bullet (get-bullet))
+     (define bullet-width (+ (pict-width bullet) 10))
+     (let* ([istyle (add-block-style style istyle)]
+            [istyle (hash-set istyle 'block-width (- (hash-ref istyle 'block-width +inf.0) bullet-width))])
        (apply vl-append (get-line-sep) ;; ??
               (for/list ([flow (in-list flows)])
-                (htl-append 10 (get-bullet) (flow->pict flow istyle)))))]
+                (htl-append 10 bullet (flow->pict flow istyle)))))]
     [(s:table style blockss)
      (table->pict blockss (add-table-style style istyle))]))
 
@@ -353,8 +356,7 @@
   (define fragments (content->fragments content istyle))
   (define lines (linebreak-fragments fragments width))
   (apply vl-append (get-line-sep)
-         (for/list ([line (in-list lines)])
-           (apply hbl-append 0 line))))
+         (for/list ([line (in-list lines)]) (apply hbl-append 0 line))))
 
 ;; A Fragment is (cons (U Pict String) IStyle), where a string either
 ;; contains no whitespace or only whitespace.
@@ -475,7 +477,7 @@
 
 (define (flow-pict #:style [style #f] . pre-flow)
   (define flow (s:decode-flow pre-flow))
-  (pretty-print (simplify flow))
+  ;; (pretty-print (simplify flow))
   (flow->pict flow (add-style style (hash-set base-istyle 'block-width (get-para-width)))))
 
 (define (simplify x)
