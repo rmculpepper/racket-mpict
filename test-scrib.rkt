@@ -15,7 +15,7 @@
   (apply s:elem #:style (s:style #f (list (s:background-color-property "pink"))) content))
 
 (define (shadow-style rad [dx 0] [dy dx])
-  (s:style #f (list (text-post-property (lambda (p) (shadow p rad dx dy))))))
+  (s:style #f (list (text-post-property (lambda (p) (shadow p rad dx dy #:shadow-color "purple"))))))
 
 (slide
  @flow-pict[#:style 'roman]{
@@ -31,8 +31,8 @@
 
    This @code[λ] is good stuff:
    @s:itemlist[
-   @s:item{it is @s:elem[#:style (shadow-style 10 5)]{@s:italic{functional@s:elem[#:style 'superscript]{ish}}}}
-   @s:item{it is @s:elem[#:style (shadow-style 10 5)]{@s:italic{higher-order}@s:elem[#:style 'subscript]{for sure}}}
+   @s:item{it is @s:elem[#:style (shadow-style 5 2)]{@s:italic{functional@s:elem[#:style 'superscript]{ish}}}}
+   @s:item{it is @s:elem[#:style (shadow-style 5 2)]{@s:italic{higher-order}@s:elem[#:style 'subscript]{for sure}}}
    ]
    })
 
