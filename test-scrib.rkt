@@ -28,8 +28,8 @@
 
    This @code[λ] is good stuff:
    @s:itemlist[
-   @s:item{it is @s:italic{functional@s:elem[#:style 'superscript]{ish}}}
-   @s:item{it is @s:italic{higher-order}@s:elem[#:style 'subscript]{for sure}}
+   @s:item{it is @s:italic[#:style "shadow"]{functional@s:elem[#:style 'superscript]{ish}}}
+   @s:item{it is @s:italic[#:style "shadow"]{higher-order}@s:elem[#:style 'subscript]{for sure}}
    ]
    })
 

@@ -23,32 +23,7 @@
 (define (get-code-inset) 0) ;; (/ (get-block-sep) 2)
 (define (get-vertical-inset) (get-line-sep))
 
-;; ------------------------------------------------------------
-;; Styles
-
-;; A Style is (style (U String Symbol #f) (Listof StyleProperty))
-;; An ElementStyle is (U String Symbol #f Style).
-
-;; Some element styles:
-;; - 'tt, 'italic, 'bold, 'roman, 'sf, 'url, 'subscript, 'superscript, 'smaller, 'larger
-;; - 'hspace -- renders its content as monospace blanks
-;; Some style properties:
-;; - (color-property (U String (list Byte Byte Byte)))
-;; - (background-color-property (U String (list Byte Byte Byte)))
-
-;; A PictTextStyle (PTStyle) is one of (see pict `text` style argument):
-;; - null or 'default
-;; - font%
-;; - 'roman, ...?               -- font family
-;; - String                     -- font face, eg "Helvetica", ...
-;; - (cons String Symbol)       -- font face and fallback family
-;; - (cons PTStyleSymbol PTStyle)
-;;   where PTStyleSymbol is one of the following:
-;;     'bold 'italic 'subscript 'superscript 'large-script 'caps
-;;     'combine 'no-combine 'aligned 'unaligned)
-;; - (cons Color PTStyle)
-
-;; ------------------------------------------------------------
+;; ============================================================
 ;; IStyle
 
 ;; An IStyle is an immutable hash mapping style keys (symbols) to values.
@@ -72,8 +47,8 @@
 ;; Basic Styles
 
 ;; Elem styles:
-;; - 'text-base : (U 'default font% (U 'roman ...) String) -- font face
-;; - 'text-mods : (Listof PStyleSymbol)
+;; - 'text-base : (U 'default font% (U 'roman ...) String) -- font face, see `text`
+;; - 'text-mods : (Listof PictTextStyleSymbol) -- see `text`
 ;; - 'color : (U String color%)
 ;; - 'bgcolor : (U String color%)
 ;; - 'keep-whitespace? : Boolean
@@ -110,6 +85,7 @@
     [("RktVal") (hash-set* istyle 'text-base 'modern 'color '(#x22 #x8B #x22))]
     [("RktBlk") (hash-set* istyle 'text-base 'modern 'keep-whitespace? #t)]
     [("RktSymDef") (hash-set* istyle 'text-base 'modern 'color "black" 'text-mods '(bold))]
+    [("shadow") (hash-cons istyle 'text-post (lambda (p) (shadow p 10 5)))]
     [(hspace) (hash-set* istyle 'text-base 'modern 'keep-whitespace? #t)]
     [(#f) istyle]
     [else (begin (when #t (eprintf "add-style: warning, ignoring: ~e\n" s)) istyle)]))
@@ -410,20 +386,28 @@
        (not (hash-ref (cdr frag) 'keep-whitespace? #f))))
 
 (define (fragment->pict fragment)
-  (define (finish p istyle)
+  (define (finish p istyle text?)
     (let* ([p (cond [(hash-ref istyle 'color #f)
                      => (lambda (c) (colorize p c))]
+                    [else p])]
+           [p (cond [(and text? (hash-ref istyle 'text-post #f))
+                     => (lambda (posts)
+                          (for/fold ([p p]) ([post (in-list (reverse posts))]) (post p)))]
+                    [else p])]
+           [p (cond [(hash-ref istyle 'elem-post #f)
+                     => (lambda (posts)
+                          (for/fold ([p p]) ([post (in-list (reverse posts))]) (post p)))]
                     [else p])]
            [p (cond [(hash-ref istyle 'bgcolor #f)
                      => (lambda (c) (bg-colorize p c))]
                     [else p])])
       p))
   (match fragment
-    [(cons (? pict? p) istyle) (finish p istyle)]
+    [(cons (? pict? p) istyle) (finish p istyle #f)]
     [(cons (? string? str) istyle)
      (define ptstyle (append (hash-ref istyle 'text-mods null) (hash-ref istyle 'text-base)))
      (define size (* (hash-ref istyle 'scale) (get-base-size)))
-     (finish (text str ptstyle size) istyle)]))
+     (finish (text str ptstyle size) istyle #t)]))
 
 ;; linebreak-fragments : (Listof fragments) PositiveReal -> (Listof (Listof Pict))
 (define (linebreak-fragments fragments width)
