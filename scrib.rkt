@@ -6,7 +6,9 @@
          (prefix-in s: scribble/latex-properties)
          (prefix-in s: scribble/decode)
          pict)
-(provide flow-pict)
+(provide flow-pict
+         text-post-property
+         elem-post-property)
 
 (define (hash-cons h k v) (hash-set h k (cons v (hash-ref h k null))))
 (define (hash-remove* h ks) (for/fold ([h h]) ([k (in-list ks)]) (hash-remove h k)))
@@ -43,6 +45,10 @@
            (base . default)
            (scale . 1)))
 
+;; Style properties
+(struct text-post-property (post))
+(struct elem-post-property (post))
+
 ;; ------------------------------------------------------------
 ;; Basic Styles
 
@@ -52,6 +58,8 @@
 ;; - 'color : (U String color%)
 ;; - 'bgcolor : (U String color%)
 ;; - 'keep-whitespace? : Boolean
+;; - 'text-post : (Listof (Pict -> Pict))
+;; - 'elem-post : (Listof (Pict -> Pict))
 
 (define (add-style s istyle)
   (match s
@@ -85,13 +93,16 @@
     [("RktVal") (hash-set* istyle 'text-base 'modern 'color '(#x22 #x8B #x22))]
     [("RktBlk") (hash-set* istyle 'text-base 'modern 'keep-whitespace? #t)]
     [("RktSymDef") (hash-set* istyle 'text-base 'modern 'color "black" 'text-mods '(bold))]
-    [("shadow") (hash-cons istyle 'text-post (lambda (p) (shadow p 10 5)))]
     [(hspace) (hash-set* istyle 'text-base 'modern 'keep-whitespace? #t)]
     [(#f) istyle]
     [else (begin (when #t (eprintf "add-style: warning, ignoring: ~e\n" s)) istyle)]))
 
 (define (add-style-prop prop istyle)
   (match prop
+    [(text-post-property post)
+     (hash-cons istyle 'text-post post)]
+    [(elem-post-property post)
+     (hash-cons istyle 'elem-post post)]
     [(s:color-property color)
      (hash-set istyle 'color (to-color color))]
     [(s:background-color-property color)

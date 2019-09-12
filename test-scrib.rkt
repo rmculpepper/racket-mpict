@@ -1,5 +1,5 @@
 #lang at-exp racket/base
-(require slideshow slideshow/code
+(require slideshow slideshow/code pict/shadow
          "scrib.rkt"
          (prefix-in s: scribble/core)
          (prefix-in s: scribble/base)
@@ -13,6 +13,9 @@
 
 (define (on-pink . content)
   (apply s:elem #:style (s:style #f (list (s:background-color-property "pink"))) content))
+
+(define (shadow-style rad [dx 0] [dy dx])
+  (s:style #f (list (text-post-property (lambda (p) (shadow p rad dx dy))))))
 
 (slide
  @flow-pict[#:style 'roman]{
@@ -28,8 +31,8 @@
 
    This @code[λ] is good stuff:
    @s:itemlist[
-   @s:item{it is @s:italic[#:style "shadow"]{functional@s:elem[#:style 'superscript]{ish}}}
-   @s:item{it is @s:italic[#:style "shadow"]{higher-order}@s:elem[#:style 'subscript]{for sure}}
+   @s:item{it is @s:elem[#:style (shadow-style 10 5)]{@s:italic{functional@s:elem[#:style 'superscript]{ish}}}}
+   @s:item{it is @s:elem[#:style (shadow-style 10 5)]{@s:italic{higher-order}@s:elem[#:style 'subscript]{for sure}}}
    ]
    })
 
