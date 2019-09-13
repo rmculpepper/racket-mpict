@@ -364,8 +364,11 @@
   (apply vl-append (get-line-sep)
          (for/list ([line (in-list lines)]) (apply hbl-append 0 line))))
 
-;; A Fragment is (cons (U Pict String) IStyle), where a string either
-;; contains no whitespace or only whitespace.
+;; A Fragment is (fragment Pict Boolean IStyle), where a pict
+;; originating from a string either contains no whitespace or only
+;; whitespace.
+(struct fragment (pict str ws? istyle) #:prefab)
+
 ;; FIXME: Start with laxer invariant: fragment never starts or ends
 ;; with whitespace; then only break if necessary.
 
@@ -374,9 +377,12 @@
   (match content
     [(? string?)
      (for/list ([seg (in-list (string->segments (regexp-replace* "\n" content " ")))])
-       (cons seg istyle))]
-    [(? symbol?) (list (cons (content-symbol->string content) istyle))]
-    [(? pict?) (list (cons content istyle))]
+       (define p (base-content->pict seg istyle))
+       (define ws? (and (regexp-match? #px"^\\s*$" seg)
+                        (not (hash-ref istyle 'keep-whitespace? #f))))
+       (fragment p seg ws? istyle))]
+    [(? symbol? s) (content->fragments (list (content-symbol->string s)) istyle)]
+    [(? pict? p) (list (fragment (base-content->pict p istyle) #f #f istyle))]
     [(s:element style content)
      (content->fragments content (add-style style istyle))]
     [(s:delayed-element _ _ plain)
@@ -399,12 +405,7 @@
     [(rarr) "→"]
     [else (error 'content-symbol->string "unknown symbol: ~e" sym)]))
 
-(define (whitespace-fragment? frag)
-  (and (pair? frag) (string? (car frag))
-       (regexp-match? #px"^\\s*$" (car frag))
-       (not (hash-ref (cdr frag) 'keep-whitespace? #f))))
-
-(define (fragment->pict fragment)
+(define (base-content->pict content istyle)
   (define (finish p istyle text?)
     (let* ([p (cond [(hash-ref istyle 'color #f)
                      => (lambda (c) (colorize p c))]
@@ -421,18 +422,18 @@
                      => (lambda (c) (bg-colorize p c))]
                     [else p])])
       p))
-  (match fragment
-    [(cons (? pict? p) istyle) (finish p istyle #f)]
-    [(cons (? string? str) istyle)
+  (match content
+    [(? pict? p) (finish p istyle #f)]
+    [(? string? str)
      (define ptstyle (append (hash-ref istyle 'text-mods null) (hash-ref istyle 'text-base)))
      (define size (* (hash-ref istyle 'scale) (get-base-size)))
      (finish (text str ptstyle size) istyle #t)]))
 
-;; linebreak-fragments : (Listof fragments) PositiveReal -> (Listof (Listof Pict))
+;; linebreak-fragments : (Listof Fragment) PositiveReal -> (Listof (Listof Pict))
 (define (linebreak-fragments fragments width)
   (define (loop frags) ;; -> (Listof (Listof Pict))
     (cond [(null? frags) null]
-          [else (let*-values ([(frags*) (dropf frags whitespace-fragment?)]
+          [else (let*-values ([(frags*) (dropf frags fragment-ws?)]
                               [(line rest-frags) (lineloop frags* null 0)])
                   (cons line (loop rest-frags)))]))
   (define (lineloop frags racc accw) ;; -> (Listof Pict) (Listof Fragments)
@@ -442,7 +443,7 @@
     (match frags
       ['() (return-line)]
       [(cons frag1 frags2)
-       (define p1 (fragment->pict frag1))
+       (define p1 (fragment-pict frag1))
        (define w1 (pict-width p1))
        (cond [(<= (+ accw w1) width)
               (lineloop frags2 (cons p1 racc) (+ accw w1))]
