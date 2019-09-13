@@ -76,7 +76,6 @@
     [(roman) (hash-set istyle 'text-base s)]
     [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
     [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
-    ;; "RBackgroundLabel"
     [("SCentered") (hash-set istyle 'block-halign 'center)]
     [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
     [("RktIn") (hash-set* istyle 'text-base 'modern 'color '(#xCC #x66 #x33))]
@@ -100,6 +99,8 @@
      (hash-cons istyle 'text-post post)]
     [(elem-post-property post)
      (hash-cons istyle 'elem-post post)]
+    [(? hash?)
+     (for/fold ([istyle istyle]) ([(k v) (in-hash prop)]) (hash-set istyle k v))]
     [(s:color-property color)
      (hash-set istyle 'color (to-color color))]
     [(s:background-color-property color)
@@ -137,9 +138,11 @@
     ;; ----
     ['vertical-inset (hash-set* istyle 'block-inset 'vertical)]
     ['code-inset (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
-    ["RBackgroundLabel"
+    ["RBackgroundLabel" ;; ie, "procedure", "syntax" etc in defproc, defform, etc
      (hash-set* istyle 'block-halign 'float-right 'inset-to-width? #f
-                'text-base 'modern 'color "darkgray")]
+                'text-base 'modern 'color "darkgray" 'scale 2/3)]
+    ["refpara" ;; style on nested-flow for margin-par
+     (hash-set* istyle 'block-halign 'right 'scale 3/4)]
     ["SCentered" (hash-set istyle 'block-halign 'center)]
     ;; ----
     [#f istyle]
@@ -447,6 +450,7 @@
     (let* ([p (cond [(hash-ref istyle 'color #f)
                      => (lambda (c) (colorize p c))]
                     [else p])]
+           [p (scale p (hash-ref istyle 'scale 1))]
            [p (cond [(and text? (hash-ref istyle 'text-post #f))
                      => (lambda (posts)
                           (for/fold ([p p]) ([post (in-list (reverse posts))]) (post p)))]
@@ -463,8 +467,8 @@
     [(? pict? p) (finish p istyle #f)]
     [(? string? str)
      (define ptstyle (append (hash-ref istyle 'text-mods null) (hash-ref istyle 'text-base)))
-     (define size (* (hash-ref istyle 'scale) (get-base-size)))
-     (finish (text str ptstyle size) istyle #t)]))
+     ;; FIXME: add 'text-size style key?
+     (finish (text str ptstyle (get-base-size)) istyle #t)]))
 
 ;; linebreak-fragments : (Listof Fragment) PositiveReal -> (Listof (Listof Pict))
 (define (linebreak-fragments fragments width)
