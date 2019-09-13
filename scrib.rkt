@@ -13,17 +13,21 @@
 (define (hash-cons h k v) (hash-set h k (cons v (hash-ref h k null))))
 (define (hash-remove* h ks) (for/fold ([h h]) ([k (in-list ks)]) (hash-remove h k)))
 
-(define (get-base-size) 32)   ;; (current-font-size) = 32
-(define (get-para-width) 800) ;; (current-para-width) = 738
-(define (get-line-sep) 5)     ;; (current-line-sep) = 5
-(define (get-block-sep) 24)   ;; (current-gap-size) = 24
+(define (get-block-width istyle) (hash-ref istyle 'block-width 800)) ;; (current-para-width) = 738
+(define (get-line-sep istyle)    (hash-ref istyle 'line-sep 5))      ;; (current-line-sep) = 5
+(define (get-block-sep istyle)   (hash-ref istyle 'block-sep 24))    ;; (current-gap-size) = 24
 
 ;; (current-main-font) = 'swiss
 ;; (current-title-color) = "black"
 ;; (current-code-font) = (bold . modern)
 
 (define (get-code-inset) 0) ;; (/ (get-block-sep) 2)
-(define (get-vertical-inset) (get-line-sep))
+(define (get-vertical-inset istyle) (get-line-sep istyle))
+
+(define BASE-SIZE 32)          ;; (current-font-size) = 32
+
+;; FIXME: Should 'larger, 'smaller, etc change font size (and not
+;; affect other picts) or scale?
 
 ;; ============================================================
 ;; IStyle
@@ -41,9 +45,15 @@
 (define base-istyle
   '#hasheq(;; Block Styles
            (inset-to-width? . #t)
+           (block-width . 800)
+           (block-sep   . 24)
+           (line-sep    . 5)
            ;; Elem Styles
-           (base . default)
+           (text-base . default)
+           (text-size . 32)
            (scale . 1)))
+
+(define current-istyle (make-parameter base-istyle))
 
 ;; Style properties
 (struct text-post-property (post))
@@ -54,6 +64,7 @@
 
 ;; Elem styles:
 ;; - 'text-base : (U 'default font% (U 'roman ...) String) -- font face, see `text`
+;; - 'text-size : Nat
 ;; - 'text-mods : (Listof PictTextStyleSymbol) -- see `text`
 ;; - 'color : (U String color%)
 ;; - 'bgcolor : (U String color%)
@@ -169,7 +180,7 @@
                      [(left) (inset p 0 0 dwidth 0)]
                      [(right) (inset p dwidth 0 0 0)]
                      [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]
-                     [(float-right) (frame p)])]
+                     [(float-right) p])]
                   [else p])]
          [p (cond [(hash-ref istyle 'bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
@@ -179,7 +190,7 @@
                   [else p])]
          [p (case (hash-ref istyle 'block-inset #f)
               [(code) (inset p (get-code-inset) 0)]
-              [(vertical) (inset p 0 (get-vertical-inset))]
+              [(vertical) (inset p 0 (get-vertical-inset istyle))]
               [else p])]
          [p (case (and (hash-ref istyle 'block-halign #f))
               [(float-right) (cons #f p)]
@@ -290,7 +301,7 @@
 
 ;; render-flow : Flow IStyle -> RenderedBlock
 (define (render-flow blocks istyle)
-  (append-blocks (get-block-sep)
+  (append-blocks (get-block-sep istyle)
                  (for/list ([block (in-list blocks)])
                    (render-block block istyle))))
 
@@ -304,7 +315,7 @@
        (apply-block-styles istyle p))]
     [(s:compound-paragraph style blocks)
      (let ([istyle (add-block-style style istyle)])
-       (append-blocks (get-line-sep)
+       (append-blocks (get-line-sep istyle)
                       (for/list ([block (in-list blocks)])
                         (render-block block istyle))))]
     [(s:nested-flow style flow)
@@ -315,7 +326,7 @@
      (define sub-width (- (hash-ref istyle 'block-width +inf.0) bullet-width))
      (let* ([istyle (add-block-style style istyle)]
             [istyle (hash-set istyle 'block-width sub-width)])
-       (append-blocks (get-line-sep)
+       (append-blocks (get-line-sep istyle)
                       (for/list ([flow (in-list flows)])
                         (htl-append 10 bullet (flow->pict flow istyle)))))]
     [(s:table style blockss)
@@ -386,7 +397,7 @@
 
 (define (get-bullet)
   ;;(text "∘" '(bold) (get-base-size))
-  (arrowhead (* 2/3 (get-base-size)) 0))
+  (arrowhead (* 2/3 BASE-SIZE) 0))
 
 ;; ------------------------------------------------------------
 ;; Content
@@ -401,7 +412,7 @@
 (define (content->pict content istyle width)
   (define fragments (content->fragments content istyle))
   (define lines (linebreak-fragments fragments width))
-  (apply vl-append (get-line-sep)
+  (apply vl-append (get-line-sep istyle)
          (for/list ([line (in-list lines)]) (apply hbl-append 0 line))))
 
 ;; A Fragment is (fragment Pict Boolean IStyle), where a pict
@@ -468,7 +479,7 @@
     [(? string? str)
      (define ptstyle (append (hash-ref istyle 'text-mods null) (hash-ref istyle 'text-base)))
      ;; FIXME: add 'text-size style key?
-     (finish (text str ptstyle (get-base-size)) istyle #t)]))
+     (finish (text str ptstyle (hash-ref istyle 'text-size)) istyle #t)]))
 
 ;; linebreak-fragments : (Listof Fragment) PositiveReal -> (Listof (Listof Pict))
 (define (linebreak-fragments fragments width)
@@ -526,7 +537,7 @@
 (define (flow-pict #:style [style #f] . pre-flow)
   (define flow (s:decode-flow pre-flow))
   (pretty-print (simplify flow))
-  (flow->pict flow (add-style style (hash-set base-istyle 'block-width (get-para-width)))))
+  (flow->pict flow (add-style style (current-istyle))))
 
 (define (simplify x)
   (match x
