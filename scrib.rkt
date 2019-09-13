@@ -76,9 +76,6 @@
     [(roman) (hash-set istyle 'text-base s)]
     [(larger) (hash-set istyle 'scale (* 3/2 (hash-ref istyle 'scale 1)))]
     [(smaller) (hash-set istyle 'scale (* 2/3 (hash-ref istyle 'scale 1)))]
-    [(boxed) (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
-    [(vertical-inset) (hash-set* istyle 'block-inset 'vertical)]
-    [(code-inset) (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
     ;; "RBackgroundLabel"
     [("SCentered") (hash-set istyle 'block-halign 'center)]
     [("RktInBG") (hash-set istyle 'bgcolor "lightgray")]
@@ -131,7 +128,9 @@
     [(s:style name props)
      (foldl add-block-style-prop (add-block-style name istyle) props)]
     ;; ----
-    ['boxed (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top))]
+    ;; Special case: tables generally disable inset-to-width?, but a boxed table restores it.
+    ['boxed (hash-set* istyle 'bgcolor "aliceblue" 'block-border '(top) 'inset-to-width? #t)]
+    ;; ----
     ['vertical-inset (hash-set* istyle 'block-inset 'vertical)]
     ['code-inset (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
     ["RBackgroundLabel" ;; FIXME: eliminate vspace
@@ -280,7 +279,8 @@
               (for/list ([flow (in-list flows)])
                 (htl-append 10 bullet (flow->pict flow istyle)))))]
     [(s:table style blockss)
-     (table->pict blockss (add-table-style style istyle))]))
+     (let ([istyle (hash-set istyle 'inset-to-width? #f)])
+       (table->pict blockss (add-table-style style istyle)))]))
 
 (define (table->pict cellss istyle)
   (define nrows (length cellss))
@@ -298,7 +298,7 @@
                  [col-style (in-list col-styles)])
         (cond [(eq? cell 'cont) #f]
               [else (render-table-cell cell cell-style col-style cell-istyle)]))))
-  (define col-widths
+  (define col-widths0
     (let ([columns (transpose rendered-cellss)])
       (for/fold ([rcolwidths null] [leftovers (make-list nrows 0)]
                  #:result (reverse rcolwidths))
@@ -316,6 +316,12 @@
           (for/list ([eff-cell-width (in-list eff-cell-widths)])
             (max 0 (- eff-cell-width col-width))))
         (values (cons col-width rcolwidths) next-leftovers))))
+  (define col-widths
+    (cond [(hash-ref istyle 'inset-to-width? #f)
+           (define width (hash-ref istyle 'block-width 0))
+           (define dwidth (max 0 (- width (apply + col-widths0))))
+           (map (lambda (w) (+ w (/ dwidth ncols))) col-widths0)]
+          [else col-widths0]))
   (define (row->pict rendered-cells)
     (for/fold ([acc null] [extra-width 0]
                #:result (apply hbl-append 0 acc)) ;; FIXME: valign????
@@ -477,7 +483,7 @@
 
 (define (flow-pict #:style [style #f] . pre-flow)
   (define flow (s:decode-flow pre-flow))
-  ;; (pretty-print (simplify flow))
+  (pretty-print (simplify flow))
   (flow->pict flow (add-style style (hash-set base-istyle 'block-width (get-para-width)))))
 
 (define (simplify x)
