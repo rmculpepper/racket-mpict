@@ -134,7 +134,8 @@
     ['vertical-inset (hash-set* istyle 'block-inset 'vertical)]
     ['code-inset (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
     ["RBackgroundLabel" ;; FIXME: eliminate vspace
-     (hash-set* istyle 'block-halign 'float-right 'inset-to-width? #t 'block-width (get-para-width)
+     (hash-set* istyle 'block-halign 'float-right
+                'inset-to-width? #f #| 'block-width (get-para-width)|#
                 'text-base 'modern 'color "darkgray")]
     ["SCentered" (hash-set istyle 'block-halign 'center)]
     ;; ----
@@ -150,14 +151,14 @@
 (define (remove-block-styles istyle)
   (hash-remove* istyle '(bgcolor block-halign block-border block-inset)))
 
-(define (apply-block-styles istyle p)
+(define (apply-block-styles istyle p [allow-float? #f])
   (let* ([p (cond [(hash-ref istyle 'inset-to-width? #f)
                    (define dwidth (- (hash-ref istyle 'block-width) (pict-width p)))
                    (case (hash-ref istyle 'block-halign 'left)
                      [(left) (inset p 0 0 dwidth 0)]
                      [(right) (inset p dwidth 0 0 0)]
                      [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]
-                     [(float-right) (pin-over (blank) 0 0 (inset p dwidth 0 0 0))])]
+                     [(float-right) (frame p) #;(pin-over (blank) 0 0 (inset p dwidth 0 0 0))])]
                   [else p])]
          [p (cond [(hash-ref istyle 'bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
@@ -168,6 +169,9 @@
          [p (case (hash-ref istyle 'block-inset #f)
               [(code) (inset p (get-code-inset) 0)]
               [(vertical) (inset p 0 (get-vertical-inset))]
+              [else p])]
+         [p (case (and allow-float? (hash-ref istyle 'block-halign #f))
+              [(float-right) (cons 'float-right (frame p))]
               [else p])])
     p))
 
@@ -252,9 +256,9 @@
 ;; - ... some other things ...
 
 (define (flow->pict blocks istyle)
-  (apply vl-append (get-block-sep)
-         (for/list ([block (in-list blocks)])
-           (block->pict block istyle))))
+  (append-blocks (get-block-sep)
+                 (for/list ([block (in-list blocks)])
+                   (block->pict block istyle))))
 
 (define (block->pict block istyle)
   (match block
@@ -262,25 +266,34 @@
      (let* ([istyle (add-block-style style istyle)]
             [width (hash-ref istyle 'block-width)])
        (define p (content->pict content (remove-block-styles istyle) width))
-       (apply-block-styles istyle p))]
+       (apply-block-styles istyle p #t))]
     [(s:compound-paragraph style blocks)
      (let ([istyle (add-block-style style istyle)])
-       (apply vl-append (get-line-sep)
-              (for/list ([block (in-list blocks)])
-                (block->pict block istyle))))]
+       (append-blocks (get-line-sep)
+                      (for/list ([block (in-list blocks)])
+                        (block->pict block istyle))))]
     [(s:nested-flow style flow)
      (flow->pict flow (add-block-style style istyle))]
     [(s:itemization style flows)
      (define bullet (get-bullet))
      (define bullet-width (+ (pict-width bullet) 10))
+     (define sub-width (- (hash-ref istyle 'block-width +inf.0) bullet-width))
      (let* ([istyle (add-block-style style istyle)]
-            [istyle (hash-set istyle 'block-width (- (hash-ref istyle 'block-width +inf.0) bullet-width))])
-       (apply vl-append (get-line-sep) ;; ??
-              (for/list ([flow (in-list flows)])
-                (htl-append 10 bullet (flow->pict flow istyle)))))]
+            [istyle (hash-set istyle 'block-width sub-width)])
+       (append-blocks (get-line-sep)
+                      (for/list ([flow (in-list flows)])
+                        (htl-append 10 bullet (flow->pict flow istyle)))))]
     [(s:table style blockss)
      (let ([istyle (hash-set istyle 'inset-to-width? #f)])
        (table->pict blockss (add-table-style style istyle)))]))
+
+(define (append-blocks sep ps)
+  (define main-p (apply vl-append sep (filter pict? ps)))
+  (let ([right-ps (map cdr (filter pair? ps))])
+    (cond [(pair? right-ps)
+           (define right-p (apply vl-append sep right-ps))
+           (rt-superimpose main-p right-p)]
+          [else main-p])))
 
 (define (table->pict cellss istyle)
   (define nrows (length cellss))
