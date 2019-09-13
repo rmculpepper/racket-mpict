@@ -123,6 +123,10 @@
 ;; - 'block-border : (Listof (U 'all 'left 'right 'top 'bottom))
 ;; - 'block-inset : (U 'code 'vertical)
 
+;; A RenderedBlock is one of
+;; - Pict
+;; - (cons (U #f Pict) Pict)
+
 (define (add-block-style s istyle)
   (match s
     [(s:style name props)
@@ -133,9 +137,8 @@
     ;; ----
     ['vertical-inset (hash-set* istyle 'block-inset 'vertical)]
     ['code-inset (hash-set* istyle 'block-inset 'code)] ;; FIXME: reduce width?
-    ["RBackgroundLabel" ;; FIXME: eliminate vspace
-     (hash-set* istyle 'block-halign 'float-right
-                'inset-to-width? #f #| 'block-width (get-para-width)|#
+    ["RBackgroundLabel"
+     (hash-set* istyle 'block-halign 'float-right 'inset-to-width? #f
                 'text-base 'modern 'color "darkgray")]
     ["SCentered" (hash-set istyle 'block-halign 'center)]
     ;; ----
@@ -151,14 +154,19 @@
 (define (remove-block-styles istyle)
   (hash-remove* istyle '(bgcolor block-halign block-border block-inset)))
 
-(define (apply-block-styles istyle p [allow-float? #f])
+;; apply-block-styles : IStyle RenderedBlock -> RenderedBlock
+(define (apply-block-styles istyle p)
+  (cond [(pair? p) (cons (and (car p) (apply-block-styles* istyle (car p))) (cdr p))]
+        [else (apply-block-styles* istyle p)]))
+
+(define (apply-block-styles* istyle p)
   (let* ([p (cond [(hash-ref istyle 'inset-to-width? #f)
                    (define dwidth (- (hash-ref istyle 'block-width) (pict-width p)))
                    (case (hash-ref istyle 'block-halign 'left)
                      [(left) (inset p 0 0 dwidth 0)]
                      [(right) (inset p dwidth 0 0 0)]
                      [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]
-                     [(float-right) (frame p) #;(pin-over (blank) 0 0 (inset p dwidth 0 0 0))])]
+                     [(float-right) (frame p)])]
                   [else p])]
          [p (cond [(hash-ref istyle 'bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
@@ -170,10 +178,26 @@
               [(code) (inset p (get-code-inset) 0)]
               [(vertical) (inset p 0 (get-vertical-inset))]
               [else p])]
-         [p (case (and allow-float? (hash-ref istyle 'block-halign #f))
-              [(float-right) (cons 'float-right (frame p))]
+         [p (case (and (hash-ref istyle 'block-halign #f))
+              [(float-right) (cons #f p)]
               [else p])])
     p))
+
+;; append-blocks : PositiveReal (Listof RenderedBlock) -> RenderedBlock
+(define (append-blocks sep ps)
+  (define (get-left p) (if (pair? p) (car p) p))
+  (define (get-right p) (if (pair? p) (cdr p) #f))
+  (define left-ps (filter pict? (map get-left ps)))
+  (define right-ps (filter pict? (map get-right ps)))
+  (cond [(null? left-ps) (cons #f (apply vr-append sep right-ps))]
+        [(null? right-ps) (apply vl-append sep left-ps)]
+        [else (cons (apply vl-append sep left-ps) (apply vr-append sep right-ps))]))
+
+(define (fix-floats p)
+  (if (pair? p) (rt-superimpose (car p) (cdr p)) p))
+
+(define (rendered-block-width p)
+  (if (pair? p) (max (if (car p) (pict-width (car p)) 0) (pict-width (cdr p))) (pict-width p)))
 
 ;; ------------------------------------------------------------
 ;; Table Styles
@@ -233,12 +257,14 @@
 (define (remove-table-cell-styles istyle)
   (hash-remove* istyle '(cell-halign cell-valign cell-border cell-bgcolor)))
 
-(define (apply-table-cell-styles istyle width p)
-  (let* ([p (let ([dwidth (- width (pict-width p))])
+(define (apply-table-cell-styles istyle width rb)
+  (let* ([p (if (pair? rb) (or (car rb) (blank)) rb)]
+         [p (let ([dwidth (- width (pict-width p))])
               (case (hash-ref istyle 'cell-halign 'left)
                 [(left) (inset p 0 0 dwidth 0)]
                 [(right) (inset p dwidth 0 0 0)]
                 [(center) (inset p (/ dwidth 2) 0 (/ dwidth 2) 0)]))]
+         [p (if (pair? rb) (rt-superimpose p (cdr rb)) p)]
          [p (cond [(hash-ref istyle 'cell-bgcolor #f)
                    => (lambda (c) (bg-colorize p c))]
                   [else p])]
@@ -255,25 +281,31 @@
 ;; - (paragraph Style Content)
 ;; - ... some other things ...
 
+;; flow->pict : Flow IStyle -> Pict
 (define (flow->pict blocks istyle)
+  (fix-floats (render-flow blocks istyle)))
+
+;; render-flow : Flow IStyle -> RenderedBlock
+(define (render-flow blocks istyle)
   (append-blocks (get-block-sep)
                  (for/list ([block (in-list blocks)])
-                   (block->pict block istyle))))
+                   (render-block block istyle))))
 
-(define (block->pict block istyle)
+;; render-block : Block IStyle -> RenderedBlock
+(define (render-block block istyle)
   (match block
     [(s:paragraph style content)
      (let* ([istyle (add-block-style style istyle)]
             [width (hash-ref istyle 'block-width)])
        (define p (content->pict content (remove-block-styles istyle) width))
-       (apply-block-styles istyle p #t))]
+       (apply-block-styles istyle p))]
     [(s:compound-paragraph style blocks)
      (let ([istyle (add-block-style style istyle)])
        (append-blocks (get-line-sep)
                       (for/list ([block (in-list blocks)])
-                        (block->pict block istyle))))]
+                        (render-block block istyle))))]
     [(s:nested-flow style flow)
-     (flow->pict flow (add-block-style style istyle))]
+     (render-flow flow (add-block-style style istyle))]
     [(s:itemization style flows)
      (define bullet (get-bullet))
      (define bullet-width (+ (pict-width bullet) 10))
@@ -286,14 +318,6 @@
     [(s:table style blockss)
      (let ([istyle (hash-set istyle 'inset-to-width? #f)])
        (table->pict blockss (add-table-style style istyle)))]))
-
-(define (append-blocks sep ps)
-  (define main-p (apply vl-append sep (filter pict? ps)))
-  (let ([right-ps (map cdr (filter pair? ps))])
-    (cond [(pair? right-ps)
-           (define right-p (apply vl-append sep right-ps))
-           (rt-superimpose main-p right-p)]
-          [else main-p])))
 
 (define (table->pict cellss istyle)
   (define nrows (length cellss))
@@ -319,7 +343,7 @@
                  [next-col (in-list (cdr (append columns (list (make-list nrows #t)))))])
         (define eff-cell-widths
           (for/list ([cell (in-list col)] [leftover leftovers])
-            (+ leftover (if cell (pict-width (car cell)) 0))))
+            (+ leftover (if cell (rendered-block-width (car cell)) 0))))
         (define col-width
           (apply max 0 (for/list ([eff-cell-width (in-list eff-cell-widths)]
                                   [next-cell (in-list next-col)]
@@ -348,10 +372,10 @@
              (values (cons cell-pict acc) 0)])))
   (apply-table-styles istyle (apply vl-append 0 (map row->pict rendered-cellss))))
 
-;; render-table-cell : Block Style Style IStyle -> (cons Pict IStyle)
+;; render-table-cell : Block Style Style IStyle -> (cons RenderedBlock IStyle)
 (define (render-table-cell block cell-style col-style istyle0)
   (define istyle (add-table-cell-style cell-style (add-table-cell-style col-style istyle0)))
-  (cons (block->pict block (remove-table-cell-styles istyle)) istyle))
+  (cons (render-block block (remove-table-cell-styles istyle)) istyle))
 
 (define (transpose xss)
   (cond [(andmap pair? xss) (cons (map car xss) (transpose (map cdr xss)))]
